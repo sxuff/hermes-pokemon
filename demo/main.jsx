@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 // Exercise the installable artifact, including its registration and teardown, not a separate UI.
 import plugin from "../dist/hermes-pokemon/plugin.js";
+import { progressionOf, evolutionLevel, XP_PER_LEVEL, LEVEL_START } from "../src/progression.js";
 import {
   events,
   simulate,
@@ -114,6 +115,23 @@ function simulateReturn() {
   enable();
 }
 document.querySelector("#return").addEventListener("click", simulateReturn);
+function simulateGrowth(evolution) {
+  const label = document.querySelector("#growth-label");
+  if (!storage.get("companion", null)?.species) {
+    label.textContent = "Choose a starter first, then try simulated growth.";
+    return;
+  }
+  dispose();
+  const record = storage.get("companion", null);
+  const current = progressionOf(record.progression?.[record.species], record.species);
+  const next = evolutionLevel(record.species, current.stage);
+  const xp = evolution && next !== null ? Math.max(current.xp, (next - LEVEL_START) * XP_PER_LEVEL) : current.xp + (evolution ? 0 : XP_PER_LEVEL);
+  storage.set("companion", { ...record, progression: { ...record.progression, [record.species]: { ...current, xp } } });
+  label.textContent = evolution ? next === null ? "Already fully evolved. Enjoy the garden!" : "Simulated: evolution is ready. Choose it beneath the garden." : "Simulated: added one level of XP.";
+  enable();
+}
+document.querySelector("#grow-level").addEventListener("click", () => simulateGrowth(false));
+document.querySelector("#grow-evolution").addEventListener("click", () => simulateGrowth(true));
 window.__demo = {
   simulate,
   emit,

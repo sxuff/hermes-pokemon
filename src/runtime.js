@@ -1,11 +1,14 @@
 import { loadSprites, createRenderer, drawSprite } from "./renderer.js";
 import { phaseForHour } from "./ambient.js";
+import { FORMS } from "./species.js";
+import { animMeta } from "./anim-meta.generated.js";
 
 const FPS = 30,
   REDUCED_FPS = 8;
 
 // Each mounted canvas owns one scheduler. Visibility changes cancel the pending frame.
-export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = () => "auto", selected, memory, onStatus, onError, onReady }) {
+export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+  const assetForm = pet?.form || form || species;
   let disposed = false,
     ready = false,
     frame = 0,
@@ -36,10 +39,14 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = 
     draw();
     memory?.flush();
     if (pet) {
-      const status = `${pet.state}:${pet.busy}:${pet.caption}`;
+      const status = `${pet.state}:${pet.busy}:${pet.caption}:${pet.canEvolve}:${pet.evolving}`;
       if (status !== lastStatus) {
         lastStatus = status;
         onStatus?.(pet);
+      }
+      if (onEvolutionComplete && !disposed) {
+        const completion = pet.drainEvolution()[0];
+        if (completion) onEvolutionComplete(completion);
       }
     }
   }
@@ -60,6 +67,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = 
       }
     }
     renderer?.tick(dt, phase, reduced());
+    if (pet && active() && document.hasFocus()) memory?.tick?.(dt);
     memory?.checkpoint();
   }
   function loop(now) {
@@ -75,7 +83,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = 
       pending = 0;
       render();
     }
-    frame = requestAnimationFrame(loop);
+    if (active()) frame = requestAnimationFrame(loop);
   }
   function refresh() {
     stop();
@@ -83,7 +91,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = 
     if (active()) {
       updatePhase();
       render();
-      frame = requestAnimationFrame(loop);
+      if (active()) frame = requestAnimationFrame(loop);
     }
   }
   function syncPresence() { memory?.setPresent(active() && document.hasFocus()); }
@@ -111,18 +119,19 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = 
         if (active()) pet.react(bridge.activity.get().kind);
       }),
     );
-  loadSprites(species)
+  loadSprites(assetForm)
     .then((sprites) => {
       if (disposed) return;
       if (pet) {
-        renderer = createRenderer(canvas, sprites, species);
+        renderer = createRenderer(canvas, sprites, species, assetForm);
         renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
         draw = () => renderer.draw(pet, phase, reduced());
       } else {
         // Starter-card preview: idle with an occasional nod, a happy hop when chosen.
         const c = canvas.getContext("2d");
-        canvas.width = 36;
-        canvas.height = 42; // headroom for the happy hop
+        const evolved = FORMS[assetForm]?.stage > 0;
+        canvas.width = evolved ? Math.max(36, sprites.Idle.width + 8) : 36;
+        canvas.height = evolved ? Math.max(42, (animMeta[assetForm].visualHeight || sprites.Idle.height) + 16) : 42; // headroom for the happy hop
         let clock = 0,
           anim = "Idle",
           once = false,
@@ -168,6 +177,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, reduced, sky = 
     window.removeEventListener("blur", syncPresence);
     window.removeEventListener("pagehide", leave);
     memory?.dispose();
+    pet?.cancelEvolution();
     disposers.forEach((fn) => fn());
   }
   // Registration-level disposal also covers a disable before React unmounts.

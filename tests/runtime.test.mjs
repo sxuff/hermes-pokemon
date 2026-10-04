@@ -2,178 +2,211 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mountCanvas } from "../src/runtime.js";
 import { Companion } from "../src/behavior.js";
-import { createPersistence } from "../src/persistence.js";
-import { createCompanionMemory } from "../src/companion-memory.js";
+import { assets } from "../src/assets.generated.js";
+import { SPOTS } from "../src/world.js";
 
-// These stubs verify scheduling and lifecycle, not canvas appearance. The actual
-// renderer still executes against a no-op drawing context; browser checks cover pixels.
-function browser(t) {
-  const saved = new Map(), frames = new Map(), images = [], observers = [];
-  let frameId = 0;
-  const events = () => {
-    const listeners = new Map();
-    return {
-      addEventListener(type, fn) {
-        if (!listeners.has(type)) listeners.set(type, new Set());
-        listeners.get(type).add(fn);
-      },
-      removeEventListener(type, fn) { listeners.get(type)?.delete(fn); },
-      dispatch(type) { for (const fn of listeners.get(type) || []) fn(); },
-      listenerCount() { return [...listeners.values()].reduce((sum, set) => sum + set.size, 0); },
-    };
-  };
-  function canvas() {
-    const context = new Proxy({}, { get: (target, key) => target[key] ?? (() => {}) });
-    return {
-      width: 640, height: 480, clientWidth: 350, clientHeight: 262.5,
-      getBoundingClientRect() { return { width: this.clientWidth, height: this.clientHeight }; },
-      getContext: () => context,
-    };
-  }
-  const doc = { ...events(), hidden: false, focused: true, hasFocus() { return this.focused; }, createElement: canvas };
-  const win = events();
-  function observer(kind) {
-    return class {
-      constructor(callback) { this.kind = kind; this.callback = callback; this.connected = false; observers.push(this); }
-      observe(target) { this.target = target; this.connected = true; }
-      disconnect() { this.connected = false; }
-      deliver(value) { if (this.connected) this.callback(kind === "intersection" ? [{ isIntersecting: value }] : []); }
-    };
-  }
-  const globals = {
-    document: doc, window: win, devicePixelRatio: 1,
-    requestAnimationFrame: (fn) => { const id = ++frameId; frames.set(id, fn); return id; },
-    cancelAnimationFrame: (id) => frames.delete(id),
-    ResizeObserver: observer("resize"), IntersectionObserver: observer("intersection"),
-    Image: class { constructor() { images.push(this); } set src(value) { this.url = value; } },
-  };
-  for (const [name, value] of Object.entries(globals)) {
-    saved.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  }
-  t.after(() => {
-    for (const [name, descriptor] of saved) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else delete globalThis[name];
-    }
-  });
+function eventHub() {
+  const handlers = new Map();
   return {
-    doc, win, canvas: canvas(), frames, observers,
-    intersection(value) { observers.filter((o) => o.kind === "intersection").forEach((o) => o.deliver(value)); },
-    resize() { observers.filter((o) => o.kind === "resize").forEach((o) => o.deliver()); },
-    async load() { images.splice(0).forEach((im) => im.onload()); await new Promise((resolve) => setImmediate(resolve)); },
-    frame(time) { const pending = [...frames.values()]; frames.clear(); pending.forEach((fn) => fn(time)); },
+    addEventListener(name, fn) {
+      if (!handlers.has(name)) handlers.set(name, new Set());
+      handlers.get(name).add(fn);
+    },
+    removeEventListener(name, fn) { handlers.get(name)?.delete(fn); },
+    emit(name) { for (const fn of handlers.get(name) || []) fn(); },
+    count() { return [...handlers.values()].reduce((sum, set) => sum + set.size, 0); },
   };
 }
-
-function atom(initial) {
+function signal(initial) {
   let value = initial;
   const listeners = new Set();
   return {
     get: () => value,
-    set(next) { value = next; [...listeners].forEach((fn) => fn()); },
-    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    set(next) { value = next; for (const listener of listeners) listener(); },
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     count: () => listeners.size,
   };
 }
-function fixture(species, now) {
-  const store = createPersistence({ get: (_, fallback) => fallback, set() {} });
-  const pet = new Companion(species, () => 0.5);
-  const memory = createCompanionMemory({ store, species, pet, now });
+
+async function fixture({ pet = new Companion("bulbasaur"), species = pet?.species, form, onEvolutionComplete } = {}) {
+  const originals = new Map(), frames = new Map(), imagesDrawn = [], observers = [];
+  let now = 100, nextFrame = 1, focused = true, seconds = 0, memoryDisposed = 0;
+  const statuses = [];
+  const context = () => new Proxy({ globalAlpha: 1, drawImage(image) { imagesDrawn.push(image); } }, {
+    get: (target, key) => key in target ? target[key] : () => {},
+  });
+  const canvasFactory = () => {
+    const drawing = context();
+    return {
+      width: 160, height: 120, clientWidth: 320, clientHeight: 240,
+      getBoundingClientRect: () => ({ width: 320, height: 240 }),
+      getContext: () => drawing,
+    };
+  };
+  const document = { ...eventHub(), hidden: false, hasFocus: () => focused, createElement: () => canvasFactory() };
+  const window = eventHub();
+  class Observer {
+    constructor(callback) { this.callback = callback; this.disconnected = false; observers.push(this); }
+    observe() { this.callback([{ isIntersecting: true }]); }
+    disconnect() { this.disconnected = true; }
+  }
+  const globals = {
+    document, window, devicePixelRatio: 1, ResizeObserver: Observer, IntersectionObserver: Observer,
+    requestAnimationFrame(callback) { const id = nextFrame++; frames.set(id, callback); return id; },
+    cancelAnimationFrame(id) { frames.delete(id); },
+    Image: class { set src(value) { this.url = value; queueMicrotask(() => this.onload?.()); } get src() { return this.url; } },
+  };
+  for (const [key, value] of Object.entries(globals)) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  const bridge = { visible: signal(true), activity: signal({ kind: "idle" }) };
   const ctx = { runtimes: new Set() };
-  const bridge = { visible: atom(true), activity: atom({ kind: "idle" }) };
-  return { store, pet, memory, ctx, bridge, species, reduced: () => false };
-}
-function assertClean(b, f) {
-  assert.equal(b.frames.size, 0);
-  assert.ok(b.observers.every((o) => !o.connected));
-  assert.equal(b.doc.listenerCount(), 0);
-  assert.equal(b.win.listenerCount(), 0);
-  assert.equal(f.bridge.visible.count(), 0);
-  assert.equal(f.bridge.activity.count(), 0);
+  const canvas = canvasFactory();
+  let readyResolve, readyReject;
+  const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+  const memory = {
+    flush() {}, checkpoint() {}, setPresent() {},
+    tick(dt) { seconds += dt; }, dispose() { memoryDisposed++; },
+  };
+  const runtime = mountCanvas({
+    canvas, ctx, bridge, pet, species, form, reduced: () => false, sky: () => "day", memory,
+    onStatus: (value) => statuses.push({ state: value.state, canEvolve: value.canEvolve, evolving: value.evolving }),
+    onReady: readyResolve, onError: readyReject, onEvolutionComplete,
+  });
+  function restore() {
+    runtime.dispose();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+  try { await ready; } catch (error) { restore(); throw error; }
+  return {
+    pet, runtime, bridge, ctx, frames, document, window, observers, imagesDrawn, statuses, canvas,
+    get seconds() { return seconds; }, get memoryDisposed() { return memoryDisposed; },
+    focus(value) { focused = value; window.emit(value ? "focus" : "blur"); },
+    hide(value) { document.hidden = value; document.emit("visibilitychange"); },
+    run(count) {
+      for (let i = 0; i < count; i++) {
+        now += 50;
+        const scheduled = [...frames.values()];
+        frames.clear();
+        for (const callback of scheduled) callback(now);
+      }
+    },
+    restore,
+  };
 }
 
-test("loaded sprites do not greet or animate before the first visible intersection", async (t) => {
-  const b = browser(t), f = fixture("bulbasaur", () => 1_000_000);
-  f.store.remember(f.species, { lastSeenAt: 900_000 });
-  const runtime = mountCanvas({ canvas: b.canvas, ...f });
-  t.after(runtime.dispose);
-  await b.load();
-  assert.equal(b.frames.size, 0);
-  assert.equal(f.pet.greetingActive, false);
-  assert.equal(f.store.getMemory(f.species).lastSeenAt, 900_000);
-  b.intersection(false);
-  assert.equal(f.store.getMemory(f.species).lastGreetingAt, 0);
-  b.intersection(true);
-  assert.equal(f.pet.greetingActive, true);
-  assert.equal(f.store.getMemory(f.species).lastGreetingAt, 1_000_000);
-  assert.equal(b.frames.size, 1);
-  const step = f.pet.step;
-  for (let i = 0; i < 10; i++) { b.resize(); runtime.refresh(); }
-  assert.equal(f.pet.step, step, "resize and refresh do not restart the greeting");
-  assert.equal(b.frames.size, 1, "refresh replaces, rather than multiplies, frames");
-  runtime.dispose();
-  assertClean(b, f);
-  assert.equal(f.ctx.runtimes.size, 0);
+test("runtime loads the evolved form while retaining its starter lineage", async () => {
+  const pet = new Companion("charmander", Math.random, { form: "charizard" });
+  const f = await fixture({ pet, species: "charmander", form: "charizard" });
+  try {
+    f.run(4);
+    assert.equal(pet.species, "charmander");
+    assert.ok(f.imagesDrawn.some((image) => image.src === assets.charizard.Idle.url));
+    assert.ok(!f.imagesDrawn.some((image) => image.src === assets.charmander.Idle.url));
+    assert.ok(f.statuses.some((status) => status.canEvolve === false), "final form is not evolution-ready");
+  } finally { f.restore(); }
 });
 
-test("disable before sprite loading finishes prevents every late callback and frame", async (t) => {
-  const b = browser(t), f = fixture("squirtle", () => 1_000_000);
-  let ready = 0, errors = 0;
-  const runtime = mountCanvas({ canvas: b.canvas, ...f, onReady: () => ready++, onError: () => errors++ });
-  b.intersection(true);
-  // Match the host's registration-level teardown before React unmounts.
-  f.ctx.runtimes.forEach((dispose) => dispose());
-  f.ctx.runtimes.clear();
-  runtime.dispose();
-  await b.load();
-  assert.equal(ready, 0);
-  assert.equal(errors, 0);
-  assert.equal(f.store.getMemory(f.species).lastSeenAt, 0);
-  assertClean(b, f);
-  assert.equal(f.ctx.runtimes.size, 0);
+test("completion can synchronously dispose a runtime without scheduling a leaked frame", async () => {
+  const completions = [];
+  let f;
+  f = await fixture({
+    pet: new Companion("bulbasaur", Math.random, { position: SPOTS.meadow }),
+    onEvolutionComplete(position) { completions.push(position); f.runtime.dispose(); },
+  });
+  try {
+    assert.ok(f.pet.beginEvolution());
+    f.runtime.refresh();
+    f.run(80);
+    assert.deepEqual(completions, [{ ...SPOTS.meadow }]);
+    assert.equal(f.frames.size, 0);
+    assert.equal(f.ctx.runtimes.size, 0);
+    assert.equal(f.document.count(), 0);
+    assert.equal(f.window.count(), 0);
+    assert.equal(f.bridge.visible.count(), 0);
+    assert.equal(f.bridge.activity.count(), 0);
+    assert.ok(f.observers.every((observer) => observer.disconnected));
+    assert.equal(f.memoryDisposed, 1);
+    assert.ok(f.statuses.some((status) => status.evolving && !status.canEvolve));
+    f.runtime.dispose();
+    assert.equal(f.memoryDisposed, 1);
+  } finally { f.restore(); }
 });
 
-test("hidden and unfocused presence defers a welcome until focus, then cleans up idempotently", async (t) => {
-  let now = 1_000_000;
-  const b = browser(t), f = fixture("charmander", () => now);
-  const runtime = mountCanvas({ canvas: b.canvas, ...f });
-  t.after(runtime.dispose);
-  b.intersection(true);
-  await b.load();
-  assert.equal(b.frames.size, 1);
-  assert.equal(f.pet.greetingActive, false, "the first visit never greets");
-  b.frame(1_000);
-  b.frame(1_100);
-  const time = f.pet.time;
-  now += 5_000;
-  f.bridge.visible.set(false);
-  assert.equal(b.frames.size, 0);
-  b.frame(70_000);
-  assert.equal(f.pet.time, time, "hidden time does not advance simulation");
-  const departed = f.store.getMemory(f.species).lastSeenAt;
-  now += 65_000;
-  b.doc.focused = false;
-  f.bridge.visible.set(true);
-  assert.equal(b.frames.size, 1);
-  assert.equal(f.pet.greetingActive, false, "visibility alone does not claim a return");
-  f.pet.throwBall();
-  b.doc.focused = true;
-  b.win.dispatch("focus");
-  assert.equal(f.pet.pendingGreeting, true);
-  assert.equal(f.pet.greetingActive, false);
-  assert.equal(f.store.getMemory(f.species).lastGreetingAt, now);
-  now += 500;
-  b.doc.hidden = true;
-  b.doc.dispatch("visibilitychange");
-  assert.equal(b.frames.size, 0);
-  const hiddenDeparture = f.store.getMemory(f.species).lastSeenAt;
-  assert.ok(hiddenDeparture > departed);
-  now += 120_000;
-  f.ctx.runtimes.forEach((dispose) => dispose());
-  f.ctx.runtimes.clear();
-  runtime.dispose();
-  runtime.dispose();
-  assert.equal(f.store.getMemory(f.species).lastSeenAt, hiddenDeparture, "hidden unmount does not extend presence");
-  assertClean(b, f);
+test("hidden evolution pauses and resumes before emitting exactly one completion", async () => {
+  const completions = [];
+  const f = await fixture({ onEvolutionComplete: (event) => completions.push(event) });
+  try {
+    f.pet.beginEvolution();
+    f.runtime.refresh();
+    f.run(15);
+    f.hide(true);
+    const time = f.pet.time;
+    f.run(100);
+    assert.equal(f.pet.time, time);
+    assert.equal(f.frames.size, 0);
+    assert.deepEqual(completions, []);
+    f.hide(false);
+    f.run(60);
+    assert.equal(completions.length, 1);
+    f.runtime.refresh();
+    f.run(30);
+    assert.equal(completions.length, 1);
+  } finally { f.restore(); }
+});
+
+test("disable during evolution cancels the transition and cannot commit on reload", async () => {
+  const completions = [];
+  const f = await fixture({ onEvolutionComplete: (event) => completions.push(event) });
+  try {
+    f.pet.beginEvolution();
+    f.runtime.refresh();
+    f.run(12);
+    const hostDispose = [...f.ctx.runtimes][0];
+    hostDispose();
+    assert.equal(f.pet.evolving, false);
+    assert.deepEqual(f.pet.drainEvolution(), []);
+    f.run(100);
+    f.runtime.refresh();
+    assert.equal(f.frames.size, 0);
+    assert.deepEqual(completions, []);
+    assert.equal(f.memoryDisposed, 1);
+  } finally { f.restore(); }
+});
+
+test("active time is counted only for a visible, focused, loaded habitat", async () => {
+  const f = await fixture();
+  try {
+    f.run(20);
+    assert.ok(f.seconds > 0.8 && f.seconds < 1.1);
+    f.focus(false);
+    const before = f.seconds;
+    f.run(40);
+    assert.equal(f.seconds, before, "an unfocused window cannot gain active time");
+    f.focus(true);
+    f.bridge.visible.set(false);
+    f.run(40);
+    assert.equal(f.seconds, before, "a hidden plugin pane cannot gain active time");
+    f.bridge.visible.set(true);
+    f.run(20);
+    assert.ok(f.seconds > before + 0.8);
+    f.runtime.dispose();
+    const disposed = f.seconds;
+    f.run(40);
+    assert.equal(f.seconds, disposed);
+  } finally { f.restore(); }
+});
+
+test("evolved-card previews load by form id without a pet or starter-only metadata", async () => {
+  const f = await fixture({ pet: null, species: "charmeleon" });
+  try {
+    assert.ok(f.imagesDrawn.some((image) => image.src === assets.charmeleon.Idle.url));
+    assert.ok(f.canvas.width >= 36 && f.canvas.height >= 46);
+    f.run(20);
+    assert.equal(f.seconds, 0, "preview cards do not count as companion activity");
+  } finally { f.restore(); }
 });

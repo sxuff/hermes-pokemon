@@ -64,16 +64,16 @@ function drawPixels(c, rows, x, y, colors) {
   );
 }
 
-export function createRenderer(canvas, sprites, species) {
+export function createRenderer(canvas, sprites, species, form = species) {
   const c = canvas.getContext("2d");
   const background = drawBackground(),
     tree = drawTree(),
     foreground = drawForeground();
   const ambient = new Ambient();
-  const shadowRx = [5, 8, 10][animMeta[species].shadowSize] || 8;
   const sp = SPECIES[species];
   let k = 1,
-    bubbleLift = 0;
+    bubbleLift = 0,
+    snapCamera = true;
   // Narrow panes get a closer, gently following camera so the Pokémon stays readable.
   const view = { x: 0, y: 0, w: WORLD.width, h: WORLD.height };
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -91,6 +91,7 @@ export function createRenderer(canvas, sprites, species) {
   }
   function drawPet(pet, reduced) {
     const anim = pet.anim;
+    const shadowRx = [5, 8, 10][animMeta[pet.form || form].shadowSize] || 8;
     if (pet.swimming) {
       // Only the top of a swimming Pokémon shows above the waterline.
       c.save();
@@ -128,7 +129,8 @@ export function createRenderer(canvas, sprites, species) {
   }
 
   function draw(pet, phase, reduced) {
-    follow(pet, reduced);
+    follow(pet, reduced || snapCamera);
+    snapCamera = false;
     c.setTransform(k, 0, 0, k, -Math.round(view.x * k), -Math.round(view.y * k));
     c.imageSmoothingEnabled = false;
     for (const event of pet.drain()) ambient.handle(event, pet);
@@ -158,13 +160,14 @@ export function createRenderer(canvas, sprites, species) {
     }
     const flame = sp.glow && !pet.swimming ? { x: pet.x + [-5, -6, -7, -3, 5, 6, 7, 3][pet.dir], y: pet.y - 10 } : null;
     ambient.drawLights(c, phase, flame, reduced);
-    if (pet.bubble) drawBubble(c, pet.bubble, pet.x, pet.y - (pet.swimming ? 20 : 26) - bubbleLift, pet.time, reduced);
+    const bodyHeight = animMeta[pet.form || form].visualHeight || 22;
+    if (pet.bubble) drawBubble(c, pet.bubble, pet.x, pet.y - Math.max(pet.swimming ? 20 : 26, bodyHeight + 4) - bubbleLift, pet.time, reduced);
     if (pet.asleep && !reduced) {
       // Two little Zs drift up and fade.
       for (let i = 0; i < 2; i++) {
         const q = (pet.time * 0.45 + i * 0.5) % 1;
         c.globalAlpha = q < 0.75 ? 1 : (1 - q) / 0.25;
-        bitmap(c, q < 0.4 ? ZZ_SMALL : ZZ, Math.round(pet.x + 6 + q * 6), Math.round(pet.y - 18 - q * 12), "#fffdf3");
+        bitmap(c, q < 0.4 ? ZZ_SMALL : ZZ, Math.round(pet.x + 6 + q * 6), Math.round(pet.y - Math.max(18, bodyHeight - 4) - q * 12), "#fffdf3");
         c.globalAlpha = 1;
       }
     }
@@ -173,6 +176,7 @@ export function createRenderer(canvas, sprites, species) {
     ambient,
     // Backing store is an integer multiple of the art grid; CSS scales it with pixelated sampling.
     resize(cssWidth, dpr) {
+      snapCamera = true;
       const zoom = cssWidth < 300 ? 1.4 : 1;
       view.w = Math.round(WORLD.width / zoom);
       view.h = Math.round(WORLD.height / zoom);

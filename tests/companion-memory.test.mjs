@@ -61,8 +61,10 @@ test("flush batches meaningful moments per species and never persists simulation
   h.controller.flush();
   assert.deepEqual(h.store.getMemory("bulbasaur"), { favoriteSpot: "shade", lastInteraction: { kind: "pet", at: h.now }, lastSeenAt: h.now, lastGreetingAt: 0 });
   assert.equal(h.store.getMemory("squirtle").lastInteraction, null);
-  assert.equal(h.writes.length, 2);
-  h.controller.flush(); assert.equal(h.writes.length, 2);
+  assert.equal(h.store.getProgression("bulbasaur").xp, 10);
+  assert.equal(h.store.getProgression("squirtle").xp, 0);
+  const count = h.writes.length;
+  h.controller.flush(); assert.equal(h.writes.length, count);
 });
 test("fresh controller survives effect replay and disposed controller cannot drain its events", () => {
   const h = harness(); h.controller.setPresent(true); h.controller.dispose();
@@ -82,4 +84,52 @@ test("actual deferred greeting stores its occurrence after cooldown reservation"
   h.advance(10_000); h.events.push({ type: "interaction", kind: "greeting" }); h.controller.flush();
   assert.equal(h.store.getMemory("bulbasaur").lastInteraction.at, h.now);
   assert.equal(h.store.getMemory("bulbasaur").lastGreetingAt, h.now);
+  assert.equal(h.store.getProgression("bulbasaur").xp, 0);
+});
+
+test("together-time saves small active batches and resumes without offline XP", () => {
+  const h = harness(); h.controller.setPresent(true);
+  for (let i = 0; i < 180; i++) { h.advance(250); h.controller.tick(.25); }
+  h.controller.setPresent(false);
+  assert.equal(h.store.getProgression("bulbasaur").xp, 0);
+  assert.equal(h.store.getProgression("bulbasaur").togetherSeconds, 45);
+  const count = h.writes.length;
+  h.advance(86_400_000);
+  for (let i = 0; i < 240; i++) h.controller.tick(.25);
+  assert.equal(h.writes.length, count);
+  h.controller.dispose();
+  const next = h.create(); next.setPresent(true);
+  for (let i = 0; i < 60; i++) { h.advance(250); next.tick(.25); }
+  next.setPresent(false);
+  assert.equal(h.store.getProgression("bulbasaur").xp, 3);
+  assert.equal(h.store.getProgression("bulbasaur").togetherSeconds, 0);
+  next.dispose();
+  next.tick(60);
+  assert.equal(h.store.getProgression("bulbasaur").xp, 3);
+});
+
+test("passive growth does not write per frame or accept long unrendered steps", () => {
+  const h = harness(); h.controller.setPresent(true);
+  for (let i = 0; i < 119; i++) h.controller.tick(.25);
+  assert.equal(h.writes.length, 1);
+  h.controller.tick(.25);
+  assert.equal(h.writes.length, 2);
+  h.controller.tick(3600);
+  h.controller.tick(Infinity);
+  h.controller.tick(-1);
+  h.controller.dispose();
+  assert.equal(h.store.getProgression("bulbasaur").xp, 0);
+  assert.equal(h.store.getProgression("bulbasaur").togetherSeconds, 30.25);
+});
+
+test("synchronous disposal during a growth write consumes active time exactly once", () => {
+  for (const seconds of [15, 30]) {
+    const h = harness(); h.controller.setPresent(true);
+    const unsubscribe = h.store.subscribe(() => h.controller.dispose());
+    for (let i = 0; i < seconds * 4; i++) h.controller.tick(.25);
+    h.controller.dispose();
+    unsubscribe();
+    assert.equal(h.store.getProgression("bulbasaur").xp, 0);
+    assert.equal(h.store.getProgression("bulbasaur").togetherSeconds, seconds);
+  }
 });

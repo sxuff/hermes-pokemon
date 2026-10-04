@@ -1,8 +1,8 @@
-# Hermes Pokémon · 0.4.0
+# Hermes Pokémon · 0.5.0
 
 A small pixel-art garden beside your Hermes conversation. Choose Bulbasaur, Charmander, or Squirtle, give it a nickname, and spend a little time together.
 
-![Hermes Pokémon garden in the browser preview](https://raw.githubusercontent.com/sxuff/hermes-pokemon/v0.4.0/docs/images/habitat.png)
+![Hermes Pokémon garden in the browser preview](https://raw.githubusercontent.com/sxuff/hermes-pokemon/v0.5.0/docs/images/habitat.png)
 
 *Browser preview with simulated Hermes events.*
 
@@ -57,7 +57,33 @@ The garden itself moves: clouds drift, the pond shimmers and ripples (watch for 
 
 Each starter quietly remembers a favorite resting spot learned from your interactions and the last thing you did together. It returns to that spot on a later visit and uses it for naps. Settings shows these small memories; there are no hunger meters or chores.
 
-Species, nickname, motion, garden light and per-species memories persist across reloads. Older saves migrate automatically. Exact position and transient reactions are not saved.
+Species, nickname, motion, garden light, per-species memories and growth persist across reloads. Older saves migrate automatically. Exact position and transient reactions are not saved.
+
+## XP & evolution
+
+Start at **level 5** and earn **30 XP per level**, up to level 50. The growth strip below the controls shows your current form, level and XP. Each starter keeps its own progress when you switch companions.
+
+| Time together or activity | XP | Reward frequency |
+| --- | --- | --- |
+| Visible garden while Hermes has focus | 3 | Every active minute |
+| Pet | 2 | Once per 30 seconds |
+| Throw ball | 8 | Once per minute |
+| Give berry | 5 | Once per minute |
+| Call over or investigate scenery | 2 | Shared 30-second cooldown |
+
+Activities stay playable during their XP cooldown. Autonomous behavior and Hermes messages do not award interaction XP. Hidden, unfocused and offline time earns no XP; nothing decays while you are away. Reloading preserves cooldowns and partial active minutes.
+
+| Starter | First evolution | Final evolution |
+| --- | --- | --- |
+| Bulbasaur | Ivysaur · level 16 | Venusaur · level 32 |
+| Charmander | Charmeleon · level 16 | Charizard · level 36 |
+| Squirtle | Wartortle · level 16 | Blastoise · level 36 |
+
+Evolution is **optional**. When ready, choose the evolution offer, preview the next form, and confirm—or choose **Not now**. Your companion finishes its current activity before evolving. The short transition has no flashing effect and becomes a still cue with reduced motion. Nickname, XP and memories carry over. You can keep a form indefinitely and keep leveling; each evolution is a separate choice. Reset position never resets growth.
+
+All nine forms use bundled real sprite sheets. Some evolved forms have fewer source poses and reuse their own idle pose for unavailable gestures; see [CREDITS.md](CREDITS.md) for exact mappings.
+
+The preview's **Simulate a level** and **Preview evolution** buttons let you try growth immediately. These controls exist only in the browser demo and never change your Hermes save.
 
 ## Browser preview & development
 
@@ -73,7 +99,7 @@ npm run demo
 
 Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
 
-`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.4.0.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
+`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.5.0.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
 
 ## Hermes awareness & compatibility
 
@@ -87,4 +113,4 @@ Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plu
 
 See [docs/VERIFICATION.md](docs/VERIFICATION.md) for completed checks and remaining limits. Browser simulation and native Hermes checks are recorded separately; the hero image above is a browser preview.
 
-This is an independent fan project. Original code is MIT-licensed; bundled Mystery Dungeon artwork is excluded from that license. See [CREDITS.md](CREDITS.md) for sources, rights and asset replacement. Evolution, XP, battles, trading, multiple pets and additional habitats are left for later.
+This is an independent fan project. Original code is MIT-licensed; bundled Mystery Dungeon artwork is excluded from that license. See [CREDITS.md](CREDITS.md) for sources, rights and asset replacement. Battles, trading, multiple pets and additional habitats are left for later.

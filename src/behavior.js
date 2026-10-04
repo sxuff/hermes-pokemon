@@ -1,4 +1,4 @@
-import { SPECIES } from "./species.js";
+import { FORMS, SPECIES } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
 import { HOME, POND, SPOTS, TREE, directionTo, findPath, inPond, nearestWalkable, walkable } from "./world.js";
 
@@ -37,12 +37,14 @@ export const CAPTIONS = {
   rippling: "One little ripple, then another",
   inviting: "Brought a ball. Want to play?",
   investigating: "Taking a closer look with you",
+  evolving: "Ready for a new chapter",
 };
 const FETCH = new Set(["chasing", "returning", "presenting"]);
 
 export class Companion {
   constructor(species, random = Math.random, options = {}) {
     this.species = species;
+    this.form = Object.hasOwn(FORMS, options.form) && FORMS[options.form].lineage === species ? options.form : species;
     this.random = random;
     this.reduced = false;
     this.time = 0;
@@ -52,9 +54,14 @@ export class Companion {
     this.affection = 0;
     this.events = [];
     this.memoryEvents = [];
+    this.evolutionEvents = [];
     this.favoriteSpot = Object.hasOwn(SPOTS, options.favoriteSpot) ? options.favoriteSpot : null;
     this.reset();
     if (this.favoriteSpot) Object.assign(this, SPOTS[this.favoriteSpot]);
+    const position = options.position;
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && walkable(position)) {
+      Object.assign(this, { x: position.x, y: position.y });
+    }
   }
   reset() {
     Object.assign(this, { x: HOME.x, y: HOME.y, dir: 0, speed: 0, path: [], plan: [], step: null });
@@ -65,6 +72,7 @@ export class Companion {
     // Resetting position must never let an invitation bypass its existing cooldown.
     this.nextInvitationAt = Math.max(this.nextInvitationAt, this.time + 45);
     this.cancelGreeting();
+    this.cancelEvolution();
     this.lastNotice = -Infinity;
     this.setAnim("Idle");
     this.start([{ kind: "pose", anim: "Idle", duration: 2, state: "idle" }]);
@@ -78,7 +86,14 @@ export class Companion {
     return this.invitationActive;
   }
   get busy() {
-    return this.fetching || Boolean(this.treat);
+    return this.fetching || Boolean(this.treat) || this.evolving;
+  }
+  get evolving() {
+    return Boolean(this.evolutionActive);
+  }
+  get canEvolve() {
+    return FORMS[this.form].stage < 2 && !this.busy && !this.swimming && !this.greetingActive && !this.pendingGreeting &&
+      !this.inviting && !this.asleep && !this.evolutionEvents.length && !["waking", "swimming", "petting", "investigating", "eating"].includes(this.state);
   }
   get caption() {
     return CAPTIONS[this.state] || CAPTIONS.idle;
@@ -87,7 +102,7 @@ export class Companion {
     return this.state === "sleeping";
   }
   animLength(name, rate = 1) {
-    const anim = animMeta[this.species].anims[name];
+    const anim = animMeta[this.form].anims[name];
     return anim.durations.reduce((a, b) => a + b, 0) / TICKS / rate;
   }
 
@@ -109,6 +124,9 @@ export class Companion {
   }
   drainMemory() {
     return this.memoryEvents.splice(0);
+  }
+  drainEvolution() {
+    return this.evolutionEvents.splice(0);
   }
   remember(kind, point = this) {
     this.lastAttention = this.time;
@@ -361,6 +379,45 @@ export class Companion {
   }
 
   // ---- interactions ----------------------------------------------------------------------
+  beginEvolution() {
+    if (!this.canEvolve) return false;
+    this.cancelGreeting();
+    this.investigationTarget = null;
+    this.lastAttention = this.time;
+    this.evolutionActive = true;
+    this.evolutionEndsAt = this.time + 2;
+    this.speed = 0;
+    this.say("sparkle", 2);
+    const state = "evolving";
+    this.start([
+      ...(this.reduced ? [{ kind: "pose", anim: "Idle", duration: 2, state }] : [
+        { kind: "pose", anim: "Nod", once: true, duration: 0.5, dir: 0, state },
+        { kind: "pose", anim: "Pose", once: true, duration: 0.8, state },
+        { kind: "pose", anim: "Idle", duration: 0.7, state },
+      ]),
+      ...this.evolutionFinish(),
+    ]);
+    return true;
+  }
+  evolutionFinish() {
+    return [
+      { kind: "call", fn() {
+        this.evolutionActive = false;
+        this.evolutionEvents = [{ x: this.x, y: this.y }];
+        this.bubble = null;
+      } },
+      { kind: "pose", anim: "Idle", duration: 2, state: "idle" },
+    ];
+  }
+  cancelEvolution() {
+    this.evolutionEvents.length = 0;
+    const active = this.evolving;
+    this.evolutionActive = false;
+    if (active) {
+      this.bubble = null;
+      this.start([{ kind: "pose", anim: "Idle", duration: 0.6, state: "idle" }]);
+    }
+  }
   userAttention() {
     this.lastAttention = this.time;
     this.cancelGreeting();
@@ -381,6 +438,7 @@ export class Companion {
     if (wasGreeting) this.start([{ kind: "pose", anim: "Idle", duration: 0.6, state: "idle" }]);
   }
   welcomeBack() {
+    if (this.evolving) return false;
     if (this.greetingActive || this.pendingGreeting) return false;
     if (this.busy || this.inviting || this.swimming || ["petting", "waking", "eating", "swimming"].includes(this.state)) {
       this.pendingGreeting = true;
@@ -408,6 +466,7 @@ export class Companion {
     ]);
   }
   pet() {
+    if (this.evolving) return false;
     this.userAttention();
     if (this.time - this.lastPet < 0.6) return false;
     this.remember("pet");
@@ -607,7 +666,7 @@ export class Companion {
     const bubble = { working: "dots", completed: "sparkle", waiting: "?" }[kind];
     if (!bubble) return;
     this.lastAttention = this.time;
-    if (this.greetingActive || this.inviting) return;
+    if (this.greetingActive || this.inviting || this.evolving) return;
     if (this.bubble?.kind === "heart" && this.bubble.until > this.time) return;
     this.say(bubble, kind === "working" ? 2.2 : 2);
     if (kind === "completed") this.emit("confetti", { y: this.y - 18 });
@@ -625,6 +684,13 @@ export class Companion {
     if (this.reduced === value) return;
     this.reduced = value;
     this.lastAttention = this.time;
+    if (value && this.evolving) {
+      this.start([
+        { kind: "pose", anim: "Idle", duration: Math.max(0.05, this.evolutionEndsAt - this.time), state: "evolving" },
+        ...this.evolutionFinish(),
+      ]);
+      return;
+    }
     if (value) this.cancelInvitation();
     if (value && this.investigationTarget) {
       this.speed = 0;

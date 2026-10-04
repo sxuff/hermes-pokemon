@@ -1,8 +1,9 @@
 import { SPECIES } from "./species.js";
 import { signal } from "./signal.js";
 import { SPOTS } from "./world.js";
+import { progressionOf, canEvolve, rewardInteraction, advanceTogetherTime } from "./progression.js";
 export const STORAGE_KEY = "companion";
-export const VERSION = 3;
+export const VERSION = 4;
 export const SKIES = ["auto", "dawn", "day", "dusk", "night"];
 export const DEFAULT_MEMORY = {
   favoriteSpot: null,
@@ -17,6 +18,7 @@ export const DEFAULT_RECORD = {
   motion: "system",
   sky: "auto",
   memories: {},
+  progression: {},
 };
 const knownSpecies = (species) => typeof species === "string" && Object.hasOwn(SPECIES, species);
 const timestamp = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 8.64e15;
@@ -46,11 +48,13 @@ export function cleanName(value, species) {
 }
 // Older saves gain memories in RAM. Write the migration only with a real change.
 export function validateRecord(raw) {
-  if (!raw || ![1, 2, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {} };
+  if (!raw || ![1, 2, 3, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
   const species = knownSpecies(raw.species) ? raw.species : null;
   const memories = {};
+  const progression = {};
   for (const name of Object.keys(SPECIES)) {
     if (raw.memories && Object.hasOwn(raw.memories, name)) memories[name] = validateMemory(raw.memories[name]);
+    if (raw.progression && Object.hasOwn(raw.progression, name)) progression[name] = progressionOf(raw.progression[name], name);
   }
   return {
     version: VERSION,
@@ -59,6 +63,7 @@ export function validateRecord(raw) {
     motion: ["system", "reduced"].includes(raw.motion) ? raw.motion : "system",
     sky: SKIES.includes(raw.sky) ? raw.sky : "auto",
     memories,
+    progression,
   };
 }
 export function createPersistence(storage) {
@@ -93,6 +98,9 @@ export function createPersistence(storage) {
     state.set({ record, warning });
     return true;
   }
+  function setProgression(species, progress) {
+    return update({ progression: { ...state.get().record.progression, [species]: progress } });
+  }
   return {
     ...state,
     update,
@@ -106,6 +114,28 @@ export function createPersistence(storage) {
       const memory = validateMemory({ ...previous, ...patch });
       if (JSON.stringify(memory) === JSON.stringify(previous)) return false;
       return update({ memories: { ...memories, [species]: memory } });
+    },
+    getProgression(species) {
+      return progressionOf(knownSpecies(species) ? state.get().record.progression[species] : null, species);
+    },
+    awardXp(species, kind, at = Date.now()) {
+      if (!knownSpecies(species)) return 0;
+      const { progress, gained } = rewardInteraction(state.get().record.progression[species], species, kind, at);
+      if (gained) setProgression(species, progress);
+      return gained;
+    },
+    addTogetherTime(species, seconds, at = Date.now()) {
+      if (!knownSpecies(species)) return 0;
+      const previous = progressionOf(state.get().record.progression[species], species);
+      const { progress, gained } = advanceTogetherTime(previous, species, seconds, at);
+      if (JSON.stringify(progress) !== JSON.stringify(previous)) setProgression(species, progress);
+      return gained;
+    },
+    evolve(species) {
+      if (!knownSpecies(species)) return false;
+      const progress = progressionOf(state.get().record.progression[species], species);
+      if (!canEvolve(species, progress)) return false;
+      return setProgression(species, { ...progress, stage: progress.stage + 1 });
     },
   };
 }

@@ -317,6 +317,73 @@
 .hp-companion-column {
   padding-top: 23px;
 }
+.hp-card-level {
+  color: var(--hp-muted);
+  font: 9px monospace;
+  margin-top: 5px;
+}
+.hp-growth {
+  margin-top: 15px;
+  font-size: 10px;
+  color: var(--hp-muted);
+}
+.hp-growth-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+  margin-bottom: 7px;
+}
+.hp-growth-line strong { color: var(--hp-text); margin-left: 5px; font-weight: 500; }
+.hp-growth progress {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  border: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--hp-line);
+  accent-color: var(--hp-accent);
+}
+.hp-growth progress::-webkit-progress-bar { background: var(--hp-line); }
+.hp-growth progress::-webkit-progress-value { background: var(--hp-accent); border-radius: 4px; }
+.hp-growth progress::-moz-progress-bar { background: var(--hp-accent); }
+.hp-growth-notice { margin-top: 8px !important; color: var(--hp-accent); }
+.hp-growth-help { margin-top: 9px; line-height: 1.65; }
+.hp-growth-help summary { cursor: pointer; width: fit-content; }
+.hp-growth-help p { margin-top: 7px !important; }
+.hp-evolve-offer {
+  margin-top: 10px;
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  border: 1px solid var(--hp-line);
+  border-radius: 7px;
+  text-align: left;
+  font-size: 11px !important;
+  color: var(--hp-accent) !important;
+  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));
+}
+.hp-evolution-choice {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--hp-line);
+  border-radius: 9px;
+  background: var(--hp-surface);
+  line-height: 1.6;
+}
+.hp-evolution-choice .hp-preview { float: right; width: 76px; height: 76px; object-fit: contain; }
+.hp-evolution-choice p { color: var(--hp-text); margin-bottom: 8px !important; }
+.hp-evolution-choice small { display: block; font-size: 10px; }
+.hp-evolution-actions { clear: both; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
+.hp-evolution-actions button { border: 1px solid var(--hp-line); border-radius: 6px; padding: 8px; font-size: 11px !important; background: var(--hp-surface); }
+.hp-evolution-actions .hp-small-primary { background: var(--hp-accent); }
+.hp-evolution-choice > small:last-child { margin-top: 8px; }
 .hp-name-row {
   display: flex;
   align-items: center;

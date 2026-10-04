@@ -5,11 +5,13 @@ Run `npm ci`, `npm run build`, then `npm run demo` from the repository root. Wit
 ```sh
 npx @playwright/cli open http://127.0.0.1:4173/
 npx @playwright/cli run-code --filename=tests/browser/smoke.js
+npx @playwright/cli run-code --filename=tests/browser/growth.js
+npx @playwright/cli run-code --filename=tests/browser/xp.js
 npx @playwright/cli run-code --filename=tests/browser/play.js
 npx @playwright/cli run-code --filename=tests/browser/lifecycle.js
 ```
 
-Run the scripts in that order. They operate only on the preview's independent localStorage; `smoke.js` resets that demo companion and writes the documentation screenshots. `play.js` needs an already-selected starter. Create `output/playwright/` before running it.
+Run the scripts in that order. They operate only on the preview's independent localStorage; `smoke.js` resets that demo companion and writes the documentation screenshots. `growth.js` uses the clearly marked demo buttons to exercise all six evolution choices. `xp.js` replaces the demo save with a v3 fixture and waits one real active minute to check XP. `play.js` needs an already-selected starter. Create `output/playwright/` before running them.
 
 The tests exercise the built ESM plugin through the explicitly simulated SDK. The demo-only debug handle makes rare invitations reproducible. Lifecycle instrumentation counts frames, observers and listeners without replacing visibility or scheduling behavior. It is never included in the installed plugin.
 

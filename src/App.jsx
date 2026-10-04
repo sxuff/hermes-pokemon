@@ -1,10 +1,56 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { SPECIES } from "./species.js";
+import { SPECIES, FORMS, formFor } from "./species.js";
 import { Companion } from "./behavior.js";
 import { mountCanvas } from "./runtime.js";
 import { SKIES } from "./persistence.js";
 import { inPond, onTree, SPOTS } from "./world.js";
 import { createCompanionMemory } from "./companion-memory.js";
+import { levelFromXp, evolutionLevel, canEvolve, XP_PER_LEVEL, LEVEL_MAX } from "./progression.js";
+
+function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve }) {
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState("");
+  const level = levelFromXp(progress.xp);
+  const form = FORMS[formFor(species, progress.stage)];
+  const targetLevel = evolutionLevel(species, progress.stage);
+  const next = targetLevel === null ? null : FORMS[formFor(species, progress.stage + 1)];
+  const eligible = canEvolve(species, progress);
+  const previous = useRef({ species, level, stage: progress.stage });
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { species, level, stage: progress.stage };
+    setConfirming(false);
+    const text = before.species !== species ? "" : progress.stage > before.stage
+      ? `Evolved into ${form.name}! A new chapter together.`
+      : level > before.level ? `Level ${level}! Growing together.` : "";
+    setNotice(text);
+    if (!text) return;
+    const timer = setTimeout(() => setNotice(""), 5000);
+    return () => clearTimeout(timer);
+  }, [species, level, progress.stage, form.name]);
+  return <section className="hp-growth" aria-label="Companion growth">
+    <div className="hp-growth-line"><span>{form.name} <strong>Lv. {level}</strong></span>
+      <span>{level === LEVEL_MAX ? "Max level" : `${progress.xp % XP_PER_LEVEL} / ${XP_PER_LEVEL} XP`}</span></div>
+    <progress aria-label="Experience toward next level" max={XP_PER_LEVEL} value={level === LEVEL_MAX ? XP_PER_LEVEL : progress.xp % XP_PER_LEVEL} />
+    {notice && <p className="hp-growth-notice" role="status">{notice}</p>}
+    {eligible && !confirming && <button className="hp-evolve-offer" disabled={!ready || pet.evolving} onClick={() => setConfirming(true)}>
+      {pet.evolving ? "Growing into something new…" : `Ready to evolve into ${next.name}`}<Icon name="arrow" size={14} />
+    </button>}
+    {confirming && eligible && <div className="hp-evolution-choice">
+      <SpritePreview species={next.id} ctx={ctx} bridge={bridge} reduced={reduced} selected={false} />
+      <p><strong>A new chapter?</strong><br />{form.name} → {next.name}</p>
+      <small>Your nickname, memories and XP stay. You can also keep this form for as long as you like.</small>
+      <div className="hp-evolution-actions"><button className="hp-small-primary" disabled={!ready || !pet.canEvolve} onClick={() => { if (onEvolve()) setConfirming(false); }}>Evolve into {next.name}</button>
+        <button onClick={() => setConfirming(false)}>Not now</button></div>
+      {!pet.canEvolve && <small>Let this little moment finish first. A gentle pet can wake a sleeping friend.</small>}
+    </div>}
+    <details className="hp-growth-help"><summary>How we grow</summary>
+      <p>Every minute together earns 3 XP while this garden is visible and Hermes has focus. Pet +2, fetch +8, berry +5, and calling or exploring +2 XP.</p>
+      <p>Petting and exploring earn XP once every 30 seconds; fetch and berries once a minute. A level takes 30 XP. No XP is lost while you’re away.</p>
+      <p>{next ? `${next.name} becomes available at level ${targetLevel}. Evolution is always your choice.` : "Fully evolved. There’s still plenty of garden to enjoy."} Growth continues up to level {LEVEL_MAX}.</p>
+    </details>
+  </section>;
+}
 
 const SPOT_NAMES = { shade: "Under the old tree", sun: "The sunny patch", bank: "Beside the pond", flowers: "By the flowers", meadow: "The quiet meadow" };
 const MOMENT_NAMES = { pet: "A little affection", ball: "A game of fetch", berry: "A berry shared", call: "Coming over to see you", greeting: "A welcome-back hello" };
@@ -113,7 +159,7 @@ function SpritePreview({ species, ctx, bridge, reduced, selected }) {
     <canvas ref={ref} className="hp-preview" width="100" height="88" aria-hidden="true" />
   );
 }
-function Choice({ record, save, ctx, bridge, reduced, onCancel }) {
+function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
   const [selected, setSelected] = useState(record.species || "bulbasaur");
   const [name, setName] = useState(record.nickname || "");
   return (
@@ -152,9 +198,10 @@ function Choice({ record, save, ctx, bridge, reduced, onCancel }) {
           >
             <span className="hp-number">No. {s.number}</span>
             <span className="hp-choice-dot" />
-            <SpritePreview species={id} ctx={ctx} bridge={bridge} reduced={reduced} selected={selected === id} />
+            <SpritePreview species={formFor(id, store.getProgression(id).stage)} ctx={ctx} bridge={bridge} reduced={reduced} selected={selected === id} />
             <strong>{s.name}</strong>
             <span className="hp-type">{s.type}</span>
+            {store.getProgression(id).xp > 0 && <small className="hp-card-level">Lv. {levelFromXp(store.getProgression(id).xp)}</small>}
           </button>
         ))}
       </div>
@@ -182,7 +229,7 @@ function Choice({ record, save, ctx, bridge, reduced, onCancel }) {
           Keep my current companion
         </button>
       )}
-      <p className="hp-fine">One small garden. A friend to share it with.</p>
+      <p className="hp-fine">Each starter keeps its own XP and evolution.</p>
     </form>
   );
 }
@@ -261,7 +308,7 @@ function Settings({ record, store, onClose, onChange, pet }) {
       </button>
       <MemoryNote memory={store.getMemory(record.species)} />
       <p className="hp-fine">
-        Sprites: CHUNSOFT via SpriteCollab.
+        Sprites: CHUNSOFT + SpriteCollab contributors.
         <br />
         Pokémon © Nintendo / Creatures / GAME FREAK.
         <br />
@@ -275,17 +322,27 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     motion = useRef(reduced),
     sky = useRef(record.sky),
     runtime = useRef(),
-    settingsButton = useRef();
+    settingsButton = useRef(),
+    evolutionPosition = useRef();
   motion.current = reduced;
   sky.current = record.sky;
-  const pet = useMemo(() => new Companion(record.species, Math.random, { favoriteSpot: store.getMemory(record.species).favoriteSpot }), [record.species, store]);
+  const progress = store.getProgression(record.species);
+  const form = formFor(record.species, progress.stage);
+  const pet = useMemo(() => new Companion(record.species, Math.random, {
+    favoriteSpot: store.getMemory(record.species).favoriteSpot, form,
+    position: evolutionPosition.current?.species === record.species ? evolutionPosition.current : undefined,
+  }), [record.species, form, store]);
   const memory = useRef();
-  const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching });
+  const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching, evolving: pet.evolving, canEvolve: pet.canEvolve });
   const [status, setStatus] = useState(snapshot);
   const [settings, setSettings] = useState(false),
     [error, setError] = useState(""),
     [ready, setReady] = useState(false);
   useEffect(() => {
+    setReady(false);
+    setError("");
+    setStatus(snapshot());
+    evolutionPosition.current = undefined;
     const controller = createCompanionMemory({ store, species: record.species, pet });
     memory.current = controller;
     runtime.current = mountCanvas({
@@ -294,19 +351,24 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       bridge,
       pet,
       species: record.species,
+      form,
       reduced: () => motion.current,
       sky: () => sky.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
       onStatus: () => setStatus(snapshot()),
+      onEvolutionComplete: (position) => {
+        evolutionPosition.current = { ...position, species: record.species };
+        store.evolve(record.species);
+      },
     });
     const mounted = runtime.current;
     return () => {
       mounted.dispose();
       if (memory.current === controller) memory.current = undefined;
     };
-  }, [pet, record.species, ctx, bridge, store]);
+  }, [pet, record.species, form, ctx, bridge, store]);
   // Opt-in development handle (set by the browser demo only); nothing is exposed in Hermes.
   useEffect(() => {
     const debug = globalThis.__hermesPokemonDebug;
@@ -325,11 +387,13 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     setStatus(snapshot());
   };
   function clickGarden(event) {
+    if (!ready || pet.evolving) return;
     const box = canvas.current.getBoundingClientRect();
     const p = runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
     // The body sits above the feet; be generous so a quick click still pets.
-    const bodyY = pet.swimming ? pet.y - 6 : pet.y - 10;
-    if (Math.abs(p.x - pet.x) < 13 && Math.abs(p.y - bodyY) < 14) pet.pet();
+    const hit = FORMS[form];
+    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
+    if (Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14)) pet.pet();
     else if (onTree(p)) { pet.investigate(p, "tree"); pet.emit("leaves", { x: p.x, y: p.y }); }
     else if (inPond(p)) { pet.investigate(p, "pond"); pet.emit("splash", { x: p.x, y: p.y + 2 }); }
     else if (Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10) pet.investigate(p, "flowers");
@@ -338,7 +402,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     memory.current?.flush();
     setStatus(snapshot());
   }
-  const s = SPECIES[record.species];
+  const s = SPECIES[record.species], currentForm = FORMS[form];
   return (
     <div className="hp-living">
       <div className="hp-scene-column">
@@ -348,7 +412,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
             width="640"
             height="480"
             onClick={clickGarden}
-            aria-label={`${record.nickname}, a ${s.name}, in a pixel-art garden. Click the Pokémon to pet it, the grass to call it over, or the tree, pond and flowers to explore together.`}
+            aria-label={`${record.nickname}, a ${currentForm.name}, in a pixel-art garden. Click the Pokémon to pet it, the grass to call it over, or the tree, pond and flowers to explore together.`}
           />
           {!ready && (
             <div className="hp-loading" role="status">
@@ -365,10 +429,10 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
               {status.caption}
             </p>
           </div>
-          <span className={`hp-badge hp-${record.species}`}>{s.type}</span>
+          <span className={`hp-badge hp-${record.species}`}>{currentForm.type}</span>
         </div>
         <div className="hp-controls">
-          <button disabled={!ready} onClick={act(() => pet.pet())} title="Pet" aria-label="Pet">
+          <button disabled={!ready || status.evolving} onClick={act(() => pet.pet())} title="Pet" aria-label="Pet">
             <Icon name="heart" />
             <span>Pet</span>
           </button>
@@ -390,6 +454,12 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
             <Icon name="settings" />
           </button>
         </div>
+        <Growth species={record.species} progress={progress} pet={pet} ready={ready} ctx={ctx} bridge={bridge} reduced={reduced} onEvolve={() => {
+          if (!canEvolve(record.species, store.getProgression(record.species))) return false;
+          const accepted = pet.beginEvolution();
+          setStatus(snapshot());
+          return accepted;
+        }} />
         {settings ? (
           <Settings record={record} store={store} pet={pet} onClose={closeSettings} onChange={onChange} />
         ) : (
@@ -425,6 +495,7 @@ export function App({ store, ctx, bridge }) {
         {!record.species || choosing ? (
           <Choice
             record={record}
+            store={store}
             ctx={ctx}
             bridge={bridge}
             reduced={reduced}

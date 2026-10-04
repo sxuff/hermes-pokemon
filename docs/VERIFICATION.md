@@ -1,5 +1,38 @@
 # Verification
 
+## 0.5.0 (2026-10-04)
+
+Adds local XP, levels and optional evolution through all three starter lines. v1–v3 saves migrate to version 4 with the existing companion, nickname, settings and memories preserved. Progression is separate for each starter lineage. The new forms retain their lineage's routines and use real bundled sprite sheets.
+
+### Executed automated checks
+
+`npm test`: **144 passed, 0 failed**. This includes all nine forms' animation timing, ten minutes of garden life, fetch and berries; all six consented evolution transitions; valid position handoff; one completion callback; reduced-motion toggles; reload/disable cancellation; visible/focused active time; XP cooldowns across reloads and clock rollback; level cap; save validation and migration; and renderer/lifecycle regressions.
+
+A review found synchronous storage notification could dispose the memory controller and count an active-time batch twice. Time is now consumed before notifying subscribers, and a regression covers both periodic and final partial batches. A visual check also found a newly narrowed camera could briefly crop the companion; the first frame after a resize now shows the companion fully before ordinary smooth following resumes.
+
+All **77 original animation sheets** and matching shadow sheets are bundled for nine forms; **2,530 frames** pass dimension/ground-anchor checks. Forty documented same-form Idle aliases fill unavailable gestures. Source files were checked byte-for-byte against the pinned SpriteCollab Git blobs. Base starter sheets and timing are unchanged. Evolved bodies, larger head clearance and narrow-pane rendering were visually inspected.
+
+### Executed browser checks
+
+Chromium, loading the built ESM plugin with the preview SDK; no visibility or animation scheduling shims. The browser scripts are committed under `tests/browser/`.
+
+| Check | Result |
+| --- | --- |
+| Original controls | Animated previews, starter selection, petting, rename/reset, page/plugin persistence, light/dark themes, 240 px layout and simulated bottom docking passed |
+| Full evolution lines | All six evolution choices exercised via the labeled demo fast-forward; declining preserved form; confirming preserved position/nickname and showed a new-form announcement |
+| Evolved play and storage | Venusaur, Blastoise and Charizard completed fetch; all six evolved forms survived reload; switching retained three separate progression entries |
+| Real passive XP | One actual visible, focused minute awarded 3 XP; no clock/rAF acceleration used |
+| Interaction XP | Pet awarded 2 XP; repeated clicks and plugin reload did not bypass its cooldown; crossing a level displayed the level-up announcement |
+| Migration | A demo v3 Dario save retained nickname and favorite spot and migrated to v4 |
+| Hidden/quiet evolution | Hidden XP stopped; hiding froze the evolution until shown; reloading mid-transition kept the old form; reduced-motion evolution completed with the quiet preference retained |
+| Lifecycle and budget | 30 draws/second, about 7–8 reduced; 15 reloads kept one frame/two observers/six SDK subscriptions/one style/one canvas with unchanged listeners; disable released every plugin resource counted |
+
+Evolution fast-forward exists only in the clearly marked browser demo and is never offered inside Hermes. The screenshots are preview captures. They are not proof of a native host session.
+
+### Native and release limits
+
+This update uses the same documented SDK surface as v0.4 and introduces no model calls, runtime network access or agent behavior changes. Its new progression behavior has not been exercised in native Hermes. Native dock dragging, full application restart persistence and actual gateway/session cues remain open smoke-test items. The catalog pull request stays a draft. Exact-commit package validation and CI outcomes are recorded in the release/PR.
+
 ## 0.4.0 (2026-10-04)
 
 Adds spontaneous ball invitations and species-specific tree, pond and flower investigations while preserving the existing sprite timing, easing, swimming, greetings and memories. A pathfinding repair also prevents straight segments from clipping the tree trunk or pond rim.
