@@ -1,0 +1,22 @@
+{
+  "name": "hermes-pokemon",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "A little Pokemon garden for Hermes Desktop",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/sxuff/hermes-pokemon.git" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
+    "demo": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "install:plugin": "node scripts/install.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  }
+}

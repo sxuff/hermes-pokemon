@@ -1,0 +1,35 @@
+name: Test and package
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify catalog bundle matches its committed source
+        run: git diff --exit-code -- desktop/plugin.js
+      - run: npm test
+      - run: npm run package
+      - name: Check ZIP integrity with an independent reader
+        run: python -c "import glob, zipfile; p = glob.glob('release/*.zip')[0]; z = zipfile.ZipFile(p); assert z.testzip() is None; assert len(z.namelist()) == 7; print('Verified', p)"

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#edf0e6" />
+    <title>Hermes Pokémon · A little company</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/demo/style.css" />
+  </head>
+  <body>
+    <header class="demo-header">
+      <a class="wordmark" href="/">hermes<span> / </span>pokémon</a
+      ><span class="demo-tag">COMPANION PREVIEW <i>0.4</i></span
+      ><button id="theme">Dark theme</button>
+    </header>
+    <main class="demo-layout">
+      <section class="demo-copy">
+        <div class="demo-kicker"><span></span> A SMALL WORLD, CLOSE BY</div>
+        <h1>A little company.<br /><em>A lot of character.</em></h1>
+        <p class="demo-description">
+          A sunny corner beside your conversation.<br />Somewhere to wander, a
+          ball to chase,<br />and a friend who’s happy you’re here.
+        </p>
+        <div class="demo-test-panel">
+          <div class="demo-panel-top">
+            <span>TRY THE CONNECTION</span
+            ><span class="simulation">SIMULATED HERMES EVENTS</span>
+          </div>
+          <p>See how your companion reacts.</p>
+          <div class="demo-events">
+            <button data-event="working" aria-pressed="false">
+              <span>◌</span>Working</button
+            ><button data-event="completed" aria-pressed="false">
+              <span>✧</span>Completed</button
+            ><button data-event="waiting" aria-pressed="false">
+              <span>?</span>Waiting</button
+            ><button data-event="idle" aria-pressed="true">
+              <span>·</span>Idle
+            </button>
+          </div>
+          <div id="event-label" role="status">Nothing to do. Just be.</div>
+          <button id="return">Simulate coming back</button>
+        </div>
+        <div class="demo-tools">
+          <label for="width"
+            >Pane width <output id="width-value">370 px</output></label
+          ><input id="width" type="range" min="240" max="500" value="370" />
+          <div>
+            <button id="dock">Dock beneath</button
+            ><button id="hide">Hide pane</button
+            ><button id="reload">Reload plugin</button>
+          </div>
+        </div>
+        <p class="demo-disclosure">
+          Browser preview · local demo storage<br />Uses the installable plugin
+          with a simulated Hermes SDK.
+        </p>
+      </section>
+      <aside class="demo-pane" aria-label="Plugin preview">
+        <div class="demo-pane-chrome">
+          <span><i></i><i></i><i></i></span><span>YOUR LITTLE CORNER</span
+          ><span>⠿</span>
+        </div>
+        <div id="plugin"></div>
+      </aside>
+    </main>
+    <footer class="demo-footer">
+      <span>NO LEVELS. NO DEADLINES. JUST GOOD COMPANY.</span
+      ><a href="/CREDITS.md">Artwork & credits ↗</a>
+    </footer>
+    <script type="module" src="/demo/bundle.js"></script>
+  </body>
+</html>

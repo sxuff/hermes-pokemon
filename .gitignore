@@ -1,0 +1,12 @@
+node_modules/
+.research/
+.playwright-cli/
+output/
+src/assets.generated.js
+demo/bundle.js
+demo/bundle.js.map
+dist/
+release/
+.backup-*/
+.claude/
+*.log

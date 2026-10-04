@@ -1,0 +1,54 @@
+# SDK inspection and implementation decisions
+
+Inspected 2026-10-04 before implementation. Hermes source commit: `af90026aa09949579bd423d24def3d38f743cde0`.
+
+For v0.3, re-inspected the installed host's local source at `8b66a51036c1e20920a17cdd049fdf55c968d683` on 2026-10-04, including the [SDK documentation](https://github.com/NousResearch/hermes-agent/blob/8b66a51036c1e20920a17cdd049fdf55c968d683/website/docs/developer-guide/desktop-plugin-sdk.md) and [exports](https://github.com/NousResearch/hermes-agent/blob/8b66a51036c1e20920a17cdd049fdf55c968d683/apps/desktop/src/sdk/index.ts). The ESM, contribution, storage and lifecycle integration remains unchanged.
+
+For v0.4, inspected current official main at `439334127f012e1ee0685acd5dba288e459af0ec`: the [Desktop SDK and package-copy contract](https://github.com/NousResearch/hermes-agent/blob/439334127f012e1ee0685acd5dba288e459af0ec/website/docs/developer-guide/desktop-plugin-sdk.md), [native plugin guide](https://github.com/NousResearch/hermes-agent/blob/439334127f012e1ee0685acd5dba288e459af0ec/website/docs/developer-guide/plugins/index.md), and [catalog admission rules](https://github.com/NousResearch/hermes-agent/blob/439334127f012e1ee0685acd5dba288e459af0ec/plugin-catalog/README.md). A native v0.3 baseline was observed on the installed host; the [verification report](VERIFICATION.md) distinguishes subsequent v0.4 checks from source inspection and browser simulation. The references below retain the initial inspection record.
+
+- [Official Desktop Plugin SDK](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/website/docs/developer-guide/desktop-plugin-sdk.md): disk installation, ESM import allowlist, `PANES_AREA`, `dock`, storage, lifecycle, focused state, and pane visibility.
+- [Initially inspected SDK exports](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/apps/desktop/src/sdk/index.ts): namespace import allows feature detection without importing absent named optional exports. React is the host's shared singleton.
+- [Host theme tokens](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/apps/desktop/src/styles.css) and [theme application](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/apps/desktop/src/themes/context.tsx): `--ui-bg-editor`, `--ui-bg-elevated`, `--ui-stroke-secondary`, text/accent tokens, and the host-calculated `--dt-midground-foreground` for readable text on accent fills. The demo uses these same names.
+- [Radio plugin](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/apps/desktop/src/plugins/radio/plugin.js): ESM, React hooks, scoped styles, contribution registration and disposal. Inspected as a current Desktop example.
+- [Official example repository at initial inspection](https://github.com/NousResearch/hermes-example-plugins/tree/38fe0fb53eff98d477f807432e965429e665ca33): the inspected README/tree contained dashboard and agent plugin examples; their imports were not used for the Desktop runtime.
+- [Wire event envelope](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/apps/shared/src/gateway-events.ts) and [generated contract](https://github.com/NousResearch/hermes-agent/blob/af90026aa09949579bd423d24def3d38f743cde0/apps/shared/src/gateway-contract.generated.ts): top-level `session_id`, `profile`, `replayed`, `type`, and `payload`; successful `message.complete`; `tool.start` / `tool.complete` payload `name` and `tool_id`.
+
+The advertised historical `hermes-desktop-plugins` skill was not present in the inspected repository tree. The canonical SDK docs, exports, example, and event contract above supplied the contract directly.
+
+## Package and release contract
+
+The repository is a standalone native package: root `plugin.yaml` (manifest v1, `kind: standalone`, `requires_hermes: ">=0.21.5"`) plus the committed, compiled `desktop/plugin.js`. The manifest declares no tools, hooks, middleware, capabilities, credentials or Python dependencies. A Desktop entrypoint is sufficient under the current native validation contract; this package has no Python entrypoint or backend. The mixed-content artwork license is documented in LICENSE/CREDITS rather than declaring all package content MIT.
+
+`hermes plugins install sxuff/hermes-pokemon` installs the repository under the host's `plugins` root. Hermes copies the desktop entry into its app-level `desktop-plugins` root with a `.hermes-package.json` ownership marker, then loads it through the normal disk pipeline. Users opt in through Capabilities → Plugins. The copy refreshes on package update/rescan. A manually installed, marker-less folder containing `plugin.js` is deliberately preserved by Hermes, so it must be moved aside when switching to package installation. The desktop id and folder remain `hermes-pokemon` in both delivery modes.
+
+The alternative ZIP uses the plain disk layout `hermes-pokemon/plugin.js`, README, CREDITS, LICENSE, build-info, and two developer documents. It is a disk installation artifact, not the root manifest package. Both paths ship exactly the same ESM bundle, importing only `@hermes/plugin-sdk`, `react` and `react/jsx-runtime`. No Hermes core modifications or runtime asset downloads are required. Direct repository installation is independent of whether a catalog submission has been accepted.
+
+Node.js 22+ builds the project. `scripts/build.mjs` validates sprite dimensions, reads each frame's ground anchor from SpriteCollab shadow sheets, embeds artwork/CSS, checks runtime imports, and emits `desktop/plugin.js` plus `dist/hermes-pokemon`. Copied documentation uses LF line endings. `scripts/package.mjs` rejects extra/missing release files and a bundle SHA256 or version mismatch, then emits a ZIP and its SHA256 file. Entries have a fixed order, timestamp and permissions with the ZIP STORE method, so identical build inputs yield identical archives. `build-info.json` separately records the plugin SHA256 for integrity verification.
+
+CI builds and tests on Linux and Windows with Node 22, checks the committed desktop bundle against regenerated output, and packages and independently reads the ZIP. The release workflow runs only on `v*` tag pushes, requires the tag to match `package.json`, and attaches the ZIP/checksum to a GitHub release after its checks pass.
+
+## Runtime and storage
+
+The plugin contributes only `hermes-pokemon:habitat`, docked at the workspace's right edge at 370px. The user can drag it beneath. Plugin id equals installation folder. The record is `ctx.storage.get/set('companion')`, version 3. It keeps species, nickname, motion and `sky`, plus a sparse `memories` map keyed by starter. Each memory contains `favoriteSpot`, `lastInteraction: { kind, at }`, `lastSeenAt` and `lastGreetingAt`; unset spots/interactions are null and unset times are zero. Unknown species/spots, invalid interaction kinds and invalid dates are normalized. v1/v2 records migrate in memory, then persist with the next actual change. Identical updates cause no writes; future-version saves remain untouched. No host localStorage or filesystem access occurs inside the plugin.
+
+`presence.js` supplies the pure welcome policy: a prior visit, at least 60 seconds away, at least five minutes since the last greeting, and no future/rollback timestamps. `companion-memory.js` records presence transitions, checkpoints every 30 seconds while present, and batches meaningful events from the pet into storage patches. `runtime.js` supplies pane visibility, document visibility and window focus, then disposes listeners and records departure. The behavior state machine handles greeting, signature routines, anticipation and presentation; rendering consumes its visual events. These features add no Hermes activity API, model calls or agent mutations.
+
+Memories are separate for each starter. Petting, berries and calls near a garden spot can make it the preferred nap spot; ordinary wandering cannot overwrite it. The last interaction is descriptive, with no score or decay. Welcomes wait for active fetch/berry play, while reduced motion replaces travel and hopping with an in-place reaction. The browser harness exposes a clearly simulated return; its localStorage remains separate from `ctx.storage` inside Hermes.
+
+v0.4 adds `inviting` and `investigating` plans. After a quiet period, a free companion may carry a ball toward the user, lower it and roll it forward, then return to ordinary activity if ignored. Invitations wait at least 35 seconds after user attention and have a 120–180 second interval after their first occurrence. Any direct interaction cancels the invitation cleanly. Tree, pond and flower clicks route to walkable viewing spots and species-specific poses; they never cancel an active fetch/berry action. Reduced motion suppresses invitations and uses an in-place glance for investigations. These behaviors use simulation time and the existing event queue; they add no background timers or persisted counters.
+
+Hermes integration is deliberately read-only. Waiting detection only observes the documented event for the known `clarify` tool; server→client `approval` and `clarify` RPC handlers are not event subscriptions and are not intercepted. This cannot cover every pending input. No gateway socket status is misused as turn activity. A missing session id is ignored, replayed events are ignored, and failure/interruption outcomes do not celebrate.
+
+Controls and text use `--ui-*` host theme variables. The illustration uses its own authored palette graded by time of day (local clock by default, or pinned in settings); it does not follow the host theme, while all framing UI does. A ResizeObserver sizes the canvas backing store to an integer multiple of the 160×120 art grid (device pixel ratio capped at 3), and CSS scales it with pixelated sampling. The plugin observes its pane's documented visibility atom, DOM intersection, zero-size containers, and document visibility.
+
+## Source responsibilities
+
+| File | Role |
+| --- | --- |
+| `world.js` | 160×120 garden geometry, walkability, A* paths and sprite direction math |
+| `behavior.js` | Explicit state machine with short walk/turn/act plans; no DOM |
+| `garden.js` / `ambient.js` | Static pixel layers, scenery, particles, bubbles and time-of-day light |
+| `renderer.js` | Shadow-anchored sprites, depth sorting and narrow-pane camera |
+| `runtime.js` | 30 fps loop (8 fps reduced), hidden-state pausing, presence and cleanup |
+| `presence.js` / `companion-memory.js` | Welcome policy, 30-second presence checkpoints and interaction writes |
+| `App.jsx` / `hermes.js` / `persistence.js` | Controls, read-only SDK integration and validated versioned storage |

@@ -1,0 +1,20 @@
+name: hermes-pokemon
+version: "0.4.0"
+manifest_version: 1
+kind: standalone
+requires_hermes: ">=0.21.5"
+description: >-
+  A cozy pixel-art Pokémon companion for Hermes Desktop. Choose and nickname
+  Bulbasaur, Charmander, or Squirtle; share a garden, play fetch, offer a berry,
+  and enjoy little welcome-back greetings and species-specific habits.
+  Desktop UI only: no Python code, tools, model calls, or runtime network access.
+author: sxuff
+homepage: https://github.com/sxuff/hermes-pokemon
+# Original code uses MIT; bundled game artwork is excluded. See LICENSE and CREDITS.md.
+# A package-wide license identifier is intentionally omitted for this mixed-content package.
+provides_tools: []
+provides_hooks: []
+provides_middleware: []
+capabilities: []
+requires_env: []
+python_dependencies: []
