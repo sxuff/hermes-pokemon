@@ -34,6 +34,12 @@ const FORMS = [
 // Wild visitors: a few small sheets each, never a companion.
 export const VISITORS = ["pidgey", "caterpie", "magikarp", "hoothoot"];
 const VISITOR_ANIMS = ["Idle", "Walk", "Hop"];
+// Extra gestures, bundled wherever the pinned set has a real sheet for that form. A form without
+// one reuses its own nearest existing move (never another Pokémon's art).
+export const EXTRA_ANIMS = {
+  LeapForth: "Hop", Tumble: "Rotate", Trip: "Nod", Charge: "DeepBreath",
+  EventSleep: "Sleep", Shake: "Rotate", Withdraw: "Laying", Kick: "Nod",
+};
 const IDLE_ALIASES = ["Wake", "Laying", "Eat", "Nod", "Pose", "LookUp", "Sit", "DeepBreath"];
 const LIMITED_FORMS = new Set(["ivysaur", "venusaur", "charizard", "wartortle", "blastoise"]);
 
@@ -182,6 +188,27 @@ for (const species of [...FORMS, ...VISITORS]) {
       meta[species].anims[name] = { ...meta[species].anims.Idle, source: "Idle" };
       aliasStatements.push(`assets.${species}.${name} = assets.${species}.Idle;`);
     }
+  if (VISITORS.includes(species)) continue;
+  for (const [name, fallback] of Object.entries(EXTRA_ANIMS)) {
+    const section = [...xml.matchAll(/<Anim>([\s\S]*?)<\/Anim>/g)].map((m) => m[1]).find((s) => s.includes(`<Name>${name}</Name>`));
+    let png = null;
+    try { png = section && !section.includes("<CopyOf>") ? await readFile(`${base}/${name}-Anim.png`) : null; } catch { png = null; }
+    if (!png) {
+      const target = meta[species].anims[fallback];
+      meta[species].anims[name] = { ...target, source: target.source ?? fallback };
+      aliasStatements.push(`assets.${species}.${name} = assets.${species}.${fallback};`);
+      continue;
+    }
+    const width = Number(section.match(/<FrameWidth>(\d+)<\/FrameWidth>/)[1]);
+    const height = Number(section.match(/<FrameHeight>(\d+)<\/FrameHeight>/)[1]);
+    const durations = [...section.matchAll(/<Duration>(\d+)<\/Duration>/g)].map((m) => Number(m[1]));
+    const sheetWidth = png.readUInt32BE(16), sheetHeight = png.readUInt32BE(20), rows = sheetHeight / height;
+    if (sheetWidth !== width * durations.length || ![1, 8].includes(rows)) throw new Error(`Invalid sprite geometry: ${species}/${name}`);
+    const shadow = decodePng(await readFile(`${base}/${name}-Shadow.png`));
+    if (shadow.width !== sheetWidth || shadow.height !== sheetHeight) throw new Error(`Shadow sheet mismatch: ${species}/${name}`);
+    meta[species].anims[name] = { durations, rows };
+    assets[species][name] = { width, height, durations, rows, anchors: anchors(shadow, width, height, durations.length, rows), url: `data:image/png;base64,${png.toString("base64")}` };
+  }
 }
 await writeFile(
   "src/assets.generated.js",

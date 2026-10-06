@@ -16,6 +16,10 @@ The included original PNG sheets and animation XML come from [PMDCollab / Sprite
 | Wartortle | [sprite/0008](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0008) | CHUNSOFT | Core set |
 | Blastoise | [sprite/0009](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0009) | CHUNSOFT | Core set |
 
+### Extra gestures (0.6.1)
+
+LeapForth, Tumble, Trip, Charge, EventSleep, Shake (Bulbasaur line), Withdraw (Squirtle line) and Kick (Charmander) come from the same pinned commit, for each form whose pinned set has a real sheet. They are original CHUNSOFT sheets, except Charmeleon's Tumble, Trip, LeapForth and EventSleep ([Grimlin](https://twitter.com/Griimlin), Discord ID `217653022094786560`) and Charizard's Charge (contributor Discord ID `237286997645983744`, `PMDCollab_1`). A form without a sheet reuses its own nearest move (for example Tumble → Rotate, EventSleep → Sleep), never another Pokémon's art.
+
 ### Wild visitors
 
 | Visitor | Source directory | Credited artist | Included sheets |

@@ -218,7 +218,7 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     items.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
     c.drawImage(foreground, 0, 0);
     ambient.drawFront(c, phase, reduced);
-    if (extras.weather === "rain") ambient.drawRain(c, reduced);
+    ambient.drawRain(c, reduced);
     // Time-of-day grade over the whole scene, then lights that should glow through it.
     const grade = GRADES[phase];
     if (grade.tint) {

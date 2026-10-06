@@ -4,7 +4,8 @@ import { signal } from "../src/signal.js";
 import { createHermesBridge } from "../src/hermes.js";
 import { Companion } from "../src/behavior.js";
 import { toolKind, TOOL_COOLDOWN } from "../src/tools.js";
-import { weatherForDate, resolveWeather, isLateNight, RAIN_CHANCE } from "../src/weather.js";
+import { weatherForDate, resolveWeather, isLateNight, RAIN_CHANCE, showersForDate, SHOWER_MINUTES } from "../src/weather.js";
+import { animMeta } from "../src/anim-meta.generated.js";
 import { daysTogether, dueMilestone, milestoneName } from "../src/milestones.js";
 import { Visitors, VISITORS, eligibleVisitors } from "../src/visitors.js";
 import { createPersistence, validateMemory } from "../src/persistence.js";
@@ -79,16 +80,27 @@ test("each tool kind has its own gesture and ends facing you", () => {
 });
 
 // ---- 2. Rainy days ----------------------------------------------------------------------------
-test("rain is picked from the date: stable all day, never in winter, about the right share", () => {
-  const day = new Date(2026, 9, 6, 9), evening = new Date(2026, 9, 6, 22);
-  assert.equal(weatherForDate(day, "autumn"), weatherForDate(evening, "autumn"));
-  let rainy = 0;
+test("rain comes as short showers picked from the date, never all day", () => {
+  let showery = 0;
   for (let d = 0; d < 1000; d++) {
     const date = new Date(2026, 0, 1 + d, 12);
-    assert.equal(weatherForDate(date, "winter"), "clear");
-    if (weatherForDate(date, "spring") === "rain") rainy++;
+    assert.deepEqual(showersForDate(date, "winter"), []);
+    const showers = showersForDate(date, "spring");
+    // Same schedule whatever time of day it is asked.
+    assert.deepEqual(showers, showersForDate(new Date(2026, 0, 1 + d, 23, 59), "spring"));
+    if (showers.length) showery++;
+    assert.ok(showers.length <= 3);
+    for (const [start, end] of showers) {
+      assert.ok(end - start >= SHOWER_MINUTES[0] && end - start <= SHOWER_MINUTES[1], `shower ${end - start} min`);
+      // Inside each shower it rains; a minute after it ends, it does not (unless another starts).
+      const inside = new Date(2026, 0, 1 + d, Math.floor(start / 60), start % 60);
+      assert.equal(weatherForDate(inside, "spring"), "rain");
+    }
+    let rainyMinutes = 0;
+    for (let m = 0; m < 1440; m += 1) if (weatherForDate(new Date(2026, 0, 1 + d, 0, m), "spring") === "rain") rainyMinutes++;
+    assert.ok(rainyMinutes <= 3 * SHOWER_MINUTES[1], `rained ${rainyMinutes} minutes`);
   }
-  assert.ok(Math.abs(rainy / 1000 - RAIN_CHANCE.spring) < 0.06, `rain share ${rainy / 1000}`);
+  assert.ok(Math.abs(showery / 1000 - RAIN_CHANCE.spring) < 0.05, `showery share ${showery / 1000}`);
   assert.equal(resolveWeather("rain", "winter"), "rain", "a pinned choice wins");
   assert.equal(resolveWeather("clear", "spring"), "clear");
   assert.equal(weatherForDate(new Date(NaN), "spring"), "clear");
@@ -308,4 +320,51 @@ test("fuzz: rain, late nights, tools, visitors and decorations together stay on 
       assert.ok(pet.events.length <= 64 && pet.memoryEvents.length <= 32);
     }
   }
+});
+
+// ---- Variety -------------------------------------------------------------------------------------
+test("every form has every extra gesture, as real art or its own nearest move", () => {
+  const extras = ["LeapForth", "Tumble", "Trip", "Charge", "EventSleep", "Shake", "Withdraw", "Kick"];
+  for (const [form, meta] of Object.entries(animMeta)) {
+    if (!meta.anims.Sleep || !meta.anims.Laying) continue; // wild visitors
+    for (const name of extras) assert.ok(meta.anims[name]?.durations?.length, `${form} ${name}`);
+  }
+  for (const starter of ["bulbasaur", "charmander", "squirtle"])
+    for (const name of ["LeapForth", "Tumble", "Trip", "Charge", "EventSleep"]) assert.ok(!animMeta[starter].anims[name].source, `${starter} ${name} is real art`);
+});
+test("idle routines never repeat back to back, and pacing varies", () => {
+  for (const species of ["bulbasaur", "charmander", "squirtle"]) {
+    let seed = 7;
+    const pet = new Companion(species, () => ((seed = (seed * 16807) % 2147483647) / 2147483647));
+    const routines = [], durations = new Set(), anims = new Set();
+    let last = null;
+    for (let t = 0; t < 3600; t += 0.05) {
+      pet.tick(0.05);
+      if (pet.lastRoutine && pet.lastRoutine !== last) { routines.push(pet.lastRoutine); last = pet.lastRoutine; }
+      if (pet.anim?.name) anims.add(pet.anim.name);
+      if (pet.step?.duration) durations.add(Math.round(pet.step.duration * 100));
+      assert.ok(walkable(pet) || pet.swimming);
+    }
+    // lastRoutine changes on every pick, so consecutive entries can never match.
+    for (let i = 1; i < routines.length; i++) assert.notEqual(routines[i], routines[i - 1]);
+    assert.ok(routines.length > 20, `${species} picked ${routines.length} routines`);
+    for (const name of ["LeapForth", "Tumble"]) assert.ok(anims.has(name), `${species} used ${name} within an hour`);
+    assert.ok(durations.size > 30, "durations vary");
+  }
+});
+test("showers fade in and out instead of switching on", async () => {
+  const { Ambient } = await import("../src/ambient.js");
+  const a = new Ambient();
+  a.tick(0.05, "day", false, "autumn", "rain");
+  assert.ok(a.rainLevel > 0 && a.rainLevel < 0.05, "starts faint");
+  for (let t = 0; t < 10; t += 0.05) a.tick(0.05, "day", false, "autumn", "rain");
+  assert.ok(a.rainLevel > 0.4 && a.rainLevel < 0.6, "halfway after ten seconds");
+  for (let t = 0; t < 15; t += 0.05) a.tick(0.05, "day", false, "autumn", "rain");
+  assert.equal(a.rainLevel, 1);
+  for (let t = 0; t < 10; t += 0.05) a.tick(0.05, "day", false, "autumn", "clear");
+  assert.ok(a.rainLevel > 0.4 && a.rainLevel < 0.6, "eases off");
+  for (let t = 0; t < 15; t += 0.05) a.tick(0.05, "day", false, "autumn", "clear");
+  assert.equal(a.rainLevel, 0);
+  a.tick(0.05, "day", true, "autumn", "rain");
+  assert.equal(a.rainLevel, 1, "reduced motion: no fade animation");
 });

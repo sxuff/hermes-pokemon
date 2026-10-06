@@ -328,7 +328,7 @@ function Settings({ record, store, onClose, onChange, pet }) {
             </button>
           ))}
         </div>
-        <small>Natural brings the odd drizzly day, picked from the date. No weather service{record.weather === "auto" ? ` (today: ${resolveWeather("auto", resolveSeason(record.season, record.hemisphere)) === "rain" ? "rain" : "clear"})` : ""}.</small>
+        <small>Natural brings a few short showers on some days, a few minutes each, picked from the date. No weather service{record.weather === "auto" ? ` (right now: ${resolveWeather("auto", resolveSeason(record.season, record.hemisphere)) === "rain" ? "a shower" : "clear"})` : ""}.</small>
       </div>
       <label className="hp-motion">
         <input

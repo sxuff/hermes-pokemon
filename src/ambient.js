@@ -60,6 +60,7 @@ export class Ambient {
     this.floaters = [];
     this.season = "summer";
     this.weather = "clear";
+    this.rainLevel = 0;
     // Fixed set of drops recycled forever: rain never allocates per frame.
     this.drops = Array.from({ length: 34 }, () => ({ x: random() * 176, y: random() * 124, speed: 65 + random() * 35 }));
     this.nextRipple = 1;
@@ -149,6 +150,9 @@ export class Ambient {
   tick(dt, phase, reduced = false, season = this.season, weather = this.weather) {
     this.season = season;
     this.weather = weather;
+    // Showers fade in and out over about twenty seconds instead of switching on.
+    const rainTarget = weather === "rain" ? 1 : 0;
+    this.rainLevel = reduced ? rainTarget : this.rainLevel + Math.sign(rainTarget - this.rainLevel) * Math.min(Math.abs(rainTarget - this.rainLevel), dt / 20);
     for (const bloom of this.blooms) bloom.age += dt;
     this.blooms = this.blooms.filter(bloom => bloom.age < bloom.life);
     for (const f of this.floaters) f.age += dt;
@@ -172,7 +176,7 @@ export class Ambient {
       cloud.x += cloud.speed * dt;
       if (cloud.x > 170) cloud.x = -16;
     }
-    if (weather === "rain")
+    if (this.rainLevel > 0)
       for (const d of this.drops) {
         d.y += d.speed * dt;
         d.x -= d.speed * 0.18 * dt;
@@ -442,13 +446,17 @@ export class Ambient {
   }
   // Soft drizzle: a cool wash plus thin slanted streaks. Reduced motion shows still drops.
   drawRain(c, reduced) {
+    const level = this.rainLevel;
+    if (level <= 0) return;
     c.globalCompositeOperation = "multiply";
+    c.globalAlpha = level;
     c.fillStyle = "#c9d3e0";
     c.fillRect(0, 0, 160, 120);
     c.globalCompositeOperation = "source-over";
-    c.globalAlpha = 0.55;
+    c.globalAlpha = 0.55 * level;
     c.fillStyle = "#e8f1ff";
-    for (const d of this.drops) {
+    const shown = Math.ceil(this.drops.length * level);
+    for (const d of this.drops.slice(0, shown)) {
       const x = Math.round(d.x), y = Math.round(d.y);
       // Longer, lighter streaks read as rain, distinct from the grass texture below.
       if (reduced) c.fillRect(x, y, 1, 2);

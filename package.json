@@ -1,6 +1,6 @@
 {
   "name": "hermes-pokemon",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "description": "A little Pokemon garden for Hermes Desktop",

@@ -1,4 +1,4 @@
-# Hermes Pokémon · 0.6.0
+# Hermes Pokémon · 0.6.1
 
 A small pixel-art garden beside your Hermes conversation. Choose Bulbasaur, Charmander, or Squirtle, give it a nickname, and spend a little time together.
 
@@ -61,7 +61,9 @@ The garden itself moves: clouds drift, the pond shimmers and ripples (watch for 
 
 **Milestones.** Day 30, day 100 and every yearly anniversary get a small celebration, and Settings shows how many days you've been together. Each is celebrated once, only near the day itself, so returning after a long break never replays old ones. Saves from earlier versions start counting from the upgrade.
 
-**Rainy days.** Some days it drizzles. The day is picked from the date, so it stays rainy all day and needs no weather service; winter has its snow instead. Squirtle loves it and splashes about in the meadow, Charmander shelters under the tree to keep its flame dry, and Bulbasaur turns its bulb up to the rain. Settings can choose **Natural**, **Clear** or **Rain**.
+**Showers.** On some days a few short showers pass through, 3 to 6 minutes each, fading in and out. They're picked from the date, so no weather service is needed; winter has its snow instead. Squirtle splashes about in the meadow, Charmander shelters under the tree to keep its flame dry, and Bulbasaur turns its bulb up to the rain, then shakes off. Settings can choose **Natural**, **Clear** or **Rain**.
+
+**More ways to move.** Pounces that sometimes end in a tumble, rolls in the grass, a curled-up sleep pose, a power-up before a big cheer, Charmander scuffing the ground and Squirtle ducking into its shell when a visitor surprises it. Routines never repeat back to back and their pacing changes each time. Evolved forms without one of these sheets reuse their own nearest move.
 
 **Late nights.** Between 1am and 5am your companion gets sleepy: slow yawns, heavy nods and more naps. Keeping you company through a long turn that late, it may doze off right beside you. Work cues let it sleep; a finished turn wakes it to cheer.
 
@@ -113,7 +115,7 @@ npm run demo
 
 Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome, a **Long turn** (the preview clock jumps three minutes into a running turn) and a **Failed turn**, simulated **Web search**, **Terminal** and **Writing files** tool calls, and a **Wild visitor**. Seasons and weather can be pinned from Settings. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
 
-`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.6.0.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
+`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.6.1.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
 
 ## Hermes awareness & compatibility
 

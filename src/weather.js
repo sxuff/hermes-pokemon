@@ -3,7 +3,10 @@
 import { localDay } from "./rhythm.js";
 
 export const WEATHER_SETTINGS = ["auto", "clear", "rain"];
-export const RAIN_CHANCE = { spring: 0.3, summer: 0.2, autumn: 0.3, winter: 0 };
+// Share of days with showers. A showery day has 1 to 3 short showers, never all-day rain.
+export const RAIN_CHANCE = { spring: 0.2, summer: 0.12, autumn: 0.2, winter: 0 };
+export const SHOWER_MINUTES = [3, 6];
+const SHOWER_WINDOW = [7 * 60, 22 * 60];
 
 function hash(n) {
   let x = (n * 2654435761) >>> 0;
@@ -13,9 +16,25 @@ function hash(n) {
   return (x >>> 0) / 4294967296;
 }
 
+// The day's showers as [startMinute, endMinute) pairs in local time. Same answer all day.
+export function showersForDate(date, season) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return [];
+  const day = localDay(date);
+  if (hash(day) >= (RAIN_CHANCE[season] ?? 0)) return [];
+  const count = 1 + Math.floor(hash(day * 7 + 1) * 3);
+  const [from, to] = SHOWER_WINDOW, [lo, hi] = SHOWER_MINUTES;
+  const showers = [];
+  for (let i = 0; i < count; i++) {
+    const start = from + Math.floor(hash(day * 7 + 2 + i * 2) * (to - from - hi));
+    const length = lo + Math.floor(hash(day * 7 + 3 + i * 2) * (hi - lo + 1));
+    showers.push([start, start + length]);
+  }
+  return showers.sort((a, b) => a[0] - b[0]);
+}
+
 export function weatherForDate(date, season) {
-  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return "clear";
-  return hash(localDay(date)) < (RAIN_CHANCE[season] ?? 0) ? "rain" : "clear";
+  const minute = date instanceof Date ? date.getHours() * 60 + date.getMinutes() : NaN;
+  return showersForDate(date, season).some(([a, b]) => minute >= a && minute < b) ? "rain" : "clear";
 }
 
 export function resolveWeather(setting, season, date = new Date()) {

@@ -1,5 +1,15 @@
 # Verification
 
+## 0.6.1 (2026-10-06)
+
+Feedback after first use: all-day rain was too much and movement felt repetitive.
+- **Showers:** a showery day (20% of spring/autumn days, 12% of summer, none in winter) now has 1 to 3 showers of 3 to 6 minutes between 7am and 10pm, picked from the date. Showers fade in and out over about 20 seconds (instantly in extra quiet mode).
+- **Movement:** LeapForth, Tumble, Trip, Charge, EventSleep, Shake, Withdraw and Kick are bundled wherever the pinned set has a real sheet; other forms reuse their own nearest move. Double was measured and dropped (it alone added about 270 KB). Idle routines never repeat back to back, and pose lengths and playback rates vary by ±20% and ±15%.
+- `npm test`: **189 passed, 0 failed** (186 + 3 new: shower schedule over 1,000 days including a minute-by-minute cap, fade in/out, and gesture coverage plus one simulated hour per starter checking no back-to-back routine and that the new moves appear). The old all-day rain test was replaced.
+- Browser: all 7 scripts pass. Six new gestures were captured on Charmander and reviewed; all render grounded and uncropped. No page errors.
+- Bundle: 1,121 KB → 1,350 KB.
+- Native: not yet exercised in Hermes Desktop.
+
 ## 0.6.0 (2026-10-06)
 
 Adds long-turn company and a bigger cheer, quiet reactions to failed turns with an occasional break offer, calendar seasons with a hemisphere setting and one seasonal habit per starter, 13 collectible keepsakes, and learned arrival times. v1–v4 saves migrate to version 5 with companion, nickname, settings, memories and growth preserved.

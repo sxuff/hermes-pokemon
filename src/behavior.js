@@ -157,7 +157,7 @@ export class Companion {
   }
   // Sleeping, or dozing beside you during a late long turn: both show drifting Zs.
   get drowsy() {
-    return this.asleep || (this.state === "dozing" && this.anim?.name === "Sleep");
+    return this.asleep || (this.state === "dozing" && ["Sleep", "EventSleep"].includes(this.anim?.name));
   }
   animLength(name, rate = 1) {
     const anim = animMeta[this.form].anims[name];
@@ -272,12 +272,24 @@ export class Companion {
         r < 0.25
           ? this.napPlan(false)
           : [{ kind: "pose", anim: "Idle", duration: 5 + this.random() * 4, state: "idle" }];
-    } else if (r < 0.3) plan = this.favoritePlan();
-    else if (r < 0.42) plan = this.signaturePlan();
-    else if (r < 0.62) plan = this.wanderPlan();
-    else if (r < 0.74) plan = this.napPlan(true);
-    else if (r < 0.87) plan = this.playPlan();
-    else plan = this.sniffPlan();
+    } else {
+      // Never the same routine twice in a row: a repeat is redrawn from the others.
+      const kinds = [[0.26, "favorite"], [0.4, "signature"], [0.58, "wander"], [0.69, "nap"], [0.85, "play"], [1, "sniff"]];
+      let kind = kinds.find(([edge]) => r < edge)[1];
+      if (kind === this.lastRoutine) {
+        const others = kinds.map(([, k]) => k).filter((k) => k !== kind);
+        kind = others[Math.floor(this.random() * others.length) % others.length];
+      }
+      this.lastRoutine = kind;
+      plan = { favorite: () => this.favoritePlan(), signature: () => this.signaturePlan(), wander: () => this.wanderPlan(),
+        nap: () => this.napPlan(true), play: () => this.playPlan(), sniff: () => this.sniffPlan() }[kind]();
+      // Same moves, different pacing each time.
+      for (const step of plan)
+        if (step.kind === "pose") {
+          if (step.duration) step.duration *= 0.8 + this.random() * 0.4;
+          if (step.once) step.rate = (step.rate || 1) * (0.85 + this.random() * 0.3);
+        }
+    }
     if (!plan.length) plan = [{ kind: "pose", anim: "Idle", duration: 2, state: "idle" }];
     // Every outing ends with a short idle so behaviors breathe instead of chaining instantly.
     plan.push({ kind: "pose", anim: "Idle", duration: 1.5 + this.random() * 2.5, look: true, state: "idle" });
@@ -468,6 +480,7 @@ export class Companion {
       { kind: "pose", anim: "LookUp", duration: 3.5, state },
       { kind: "pose", anim: "DeepBreath", once: true, rate: 0.7, state },
       { kind: "pose", anim: "LookUp", duration: 2.5, state },
+      { kind: "pose", anim: "Shake", once: true, state },
     ];
   }
   // Late at night: a slow yawn and a heavy nod, sometimes a nap right where it is.
@@ -503,7 +516,7 @@ export class Companion {
       ...(travel ? [{ kind: "walk", to: spot, state: "walking" }] : []),
       { kind: "turn", dir: 7 },
       { kind: "pose", anim: "Laying", duration: 1.2, state: "sleeping" },
-      { kind: "pose", anim: "Sleep", rate: 0.5, duration: 10 + this.random() * 10, state: "sleeping" },
+      { kind: "pose", anim: this.random() < 0.4 ? "EventSleep" : "Sleep", rate: 0.5, duration: 10 + this.random() * 10, state: "sleeping" },
       ...this.wakePlan(),
     ];
   }
@@ -514,6 +527,27 @@ export class Companion {
     ];
   }
   playPlan() {
+    const q = this.random();
+    if (q < 0.3)
+      // Pounce after the butterfly, sometimes landing in a heap.
+      return [
+        { kind: "call", fn: () => this.emit("butterfly") },
+        { kind: "pose", anim: "Idle", duration: 0.6, state: "playing" },
+        { kind: "pose", anim: "LeapForth", once: true, state: "playing" },
+        ...(this.random() < 0.5
+          ? [{ kind: "pose", anim: "Trip", once: true, state: "playing" }, { kind: "pose", anim: "Wake", once: true, state: "playing" }]
+          : [{ kind: "pose", anim: "Hop", once: true, state: "playing" }]),
+        { kind: "call", fn: () => this.say("note", 1.4) },
+        { kind: "pose", anim: "Idle", duration: 0.8, state: "playing" },
+      ];
+    if (q < 0.55)
+      // A happy roll in the grass.
+      return [
+        { kind: "pose", anim: "Tumble", once: true, state: "playing" },
+        { kind: "pose", anim: "Tumble", once: true, rate: 0.9, state: "playing" },
+        { kind: "call", fn: () => this.say("note", 1.4) },
+        { kind: "pose", anim: "Pose", once: true, state: "playing" },
+      ];
     return [
       { kind: "call", fn: () => this.emit("butterfly") },
       { kind: "pose", anim: "Rotate", once: true, rate: 0.7, state: "playing" },
@@ -527,6 +561,7 @@ export class Companion {
     return [
       { kind: "walk", to: SPOTS.flowers, state: "walking" },
       { kind: "turn", dir: 0 },
+      ...(this.species === "charmander" && this.random() < 0.5 ? [{ kind: "pose", anim: "Kick", once: true, rate: 0.8, state: "sniffing" }] : []),
       { kind: "pose", anim: "Eat", rate: 0.6, duration: 2.2, state: "sniffing" },
       { kind: "call", fn: () => this.emit("petals") },
       { kind: "pose", anim: "Nod", once: true, state: "sniffing" },
@@ -684,6 +719,7 @@ export class Companion {
     this.start([
       { kind: "turn", dir: directionTo(x - this.x, y - this.y), state },
       { kind: "call", fn: () => this.say("!", 1) },
+      ...(this.species === "squirtle" && !this.reduced && this.random() < 0.4 ? [{ kind: "pose", anim: "Withdraw", once: true, rate: 0.8, state }] : []),
       { kind: "pose", anim: "Idle", duration: 3, state },
       ...(this.reduced ? [] : [{ kind: "pose", anim: "Nod", once: true, rate: 0.8, state }]),
       { kind: "pose", anim: "Idle", duration: 1.5, state },
@@ -1052,7 +1088,7 @@ export class Companion {
     if (kind === "working") plan.push({ kind: "pose", anim: "Nod", once: true, rate: 0.8, state }, { kind: "pose", anim: "Idle", duration: 1.2, state });
     else if (big)
       plan.push(
-        { kind: "pose", anim: "DeepBreath", once: true, state },
+        { kind: "pose", anim: this.reduced ? "DeepBreath" : "Charge", once: true, state },
         { kind: "call", fn: () => this.emit("confetti", { y: this.y - 18 }) },
         { kind: "pose", anim: "Hop", once: true, state },
         { kind: "pose", anim: "Hop", once: true, rate: 1.2, state },
@@ -1060,7 +1096,7 @@ export class Companion {
         { kind: "pose", anim: "Idle", duration: 1, state },
       );
     else if (kind === "completed")
-      plan.push({ kind: "pose", anim: "Hop", once: true, state }, { kind: "pose", anim: "Pose", once: true, state });
+      plan.push({ kind: "pose", anim: !this.reduced && this.random() < 0.4 ? "LeapForth" : "Hop", once: true, state }, { kind: "pose", anim: "Pose", once: true, state });
     else plan.push({ kind: "pose", anim: "Idle", duration: 2, state });
     this.start(plan);
   }
