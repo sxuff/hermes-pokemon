@@ -287,7 +287,16 @@ export function drawBackground() {
 }
 
 // The tree is its own layer so the Pokémon can walk behind the trunk.
-export function drawTree() {
+// Canopy palettes per season; spring adds blossoms, winter a dusting of snow on top.
+export const CANOPY = {
+  spring: [P.leaf0, P.leaf1, P.leaf2, P.leaf3, P.leaf4],
+  summer: [P.leaf0, P.leaf1, P.leaf2, P.leaf3, P.leaf4],
+  autumn: ["#7a3b22", "#a4502b", "#cf6f30", "#e5993c", "#f3c35a"],
+  winter: ["#24493a", "#2f5b46", "#3f6f55", "#5c8770", "#7fa58d"],
+};
+export const SNOW = "#f4f8fb";
+export const FROST = "#dfeaf2";
+export function drawTree(season = "summer") {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
   canvas.height = 64;
@@ -342,7 +351,7 @@ export function drawTree() {
         // Later (front) blobs overwrite earlier ones, except their dark rims stay readable.
         leaf.set(key, d > 0.88 ? Math.min(tone, 1) : tone);
       }
-  const tones = [P.leaf0, P.leaf1, P.leaf2, P.leaf3, P.leaf4];
+  const tones = CANOPY[season] || CANOPY.summer;
   for (const [key, tone] of leaf) {
     const [x, y] = key.split(",").map(Number);
     for (const [dx, dy] of [
@@ -369,8 +378,26 @@ export function drawTree() {
     dot(W(x - 2), H(y + 1), down);
     dot(W(x + 2), H(y + 1), down);
   }
-  // A few Oran Berries hiding in the leaves.
-  for (const [x, y] of [
+  if (season === "spring")
+    // Blossom clusters: small five-dot flowers, deterministic so the tree never flickers.
+    for (let i = 0; i < 26; i++) {
+      const [bx, by, r] = blobs[Math.floor(rand() * blobs.length)];
+      const a = rand() * Math.PI * 2, d = rand() * r * 0.85;
+      const x = Math.round(bx + Math.cos(a) * d), y = Math.round(by + Math.sin(a) * d);
+      if (!leaf.has(`${x},${y}`)) continue;
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) dot(W(x + dx), H(y + dy), dx || dy ? P.pink : "#fde3ec");
+    }
+  if (season === "winter")
+    // Snow settles on every upward-facing edge of the canopy.
+    for (const key of leaf.keys()) {
+      const [x, y] = key.split(",").map(Number);
+      if (!leaf.has(`${x},${y - 1}`)) {
+        dot(W(x), H(y), SNOW);
+        if (leaf.has(`${x},${y + 1}`) && (x + y) % 3) dot(W(x), H(y + 1), FROST);
+      }
+    }
+  // A few Oran Berries hiding in the leaves (gone in winter).
+  for (const [x, y] of season === "winter" ? [] : [
     [TREE.x - 10, 30],
     [TREE.x + 13, 28],
     [TREE.x + 3, 37],
@@ -381,6 +408,80 @@ export function drawTree() {
     dot(W(x + 1), H(y - 1), P.leaf0);
   }
   return { canvas, x: ox, y: oy, baseY: TREE.y };
+}
+
+// Seasonal ground details over the cached background: spring buds, autumn leaf litter,
+// winter frost and an icy pond rim. Summer is the original garden.
+export function drawSeasonGround(season) {
+  const canvas = document.createElement("canvas");
+  canvas.width = WORLD.width;
+  canvas.height = WORLD.height;
+  if (season === "summer") return canvas;
+  const c = canvas.getContext("2d");
+  const { rect, dot, ellipse } = pen(c);
+  const rand = rng(season === "spring" ? 31 : season === "autumn" ? 57 : 83);
+  const inPondArea = (x, y) => ((x - POND.x) / (POND.rx + 4)) ** 2 + ((y - POND.y) / (POND.ry + 3)) ** 2 < 1;
+  // Keep the stepping-stone path and the flower bed readable in every season.
+  const onPath = (x, y) => Math.abs(x - HOME.x) < 9 && y > 80;
+  const clear = (x, y) => !inPondArea(x, y) && !onPath(x, y) && y >= 38 && y < 119 && x > 1 && x < 158;
+  if (season === "spring") {
+    // A few small clumps of spring flowers: each a leafy base with 2-3 stemmed blooms.
+    const clumps = [[66, 52], [118, 48], [148, 66], [40, 88], [104, 112], [150, 112], [78, 100]];
+    clumps.forEach(([cx, cy], i) => {
+      if (!clear(cx, cy)) return;
+      ellipse(cx, cy + 1, 4, 1.5, P.grassDarker);
+      const color = [P.white, P.pink, P.yellow, P.violet][i % 4];
+      for (const [dx, h] of [[-2, 2], [1, 3], [3, 2]].slice(0, 2 + (i % 2))) {
+        rect(cx + dx, cy - h + 1, 1, h, P.grassDark);
+        dot(cx + dx - 1, cy - h, color);
+        dot(cx + dx + 1, cy - h, color);
+        dot(cx + dx, cy - h - 1, color);
+        dot(cx + dx, cy - h, P.yellow);
+      }
+    });
+  } else if (season === "autumn") {
+    const colors = ["#cf6f30", "#e5993c", "#a4502b", "#f3c35a"];
+    // Fallen leaves gather in a few soft piles: a wide one under the tree, small drifts
+    // by the fence and the path, each a dark base with lighter leaves on top.
+    const piles = [[TREE.x - 6, TREE.y + 6, 13, 3], [TREE.x + 14, TREE.y + 3, 7, 2], [88, 42, 6, 1.5], [132, 44, 5, 1.5], [44, 100, 6, 2], [118, 104, 5, 1.5]];
+    for (const [cx, cy, rx, ry] of piles) {
+      // Only the big pile gets a solid base; small drifts are loose leaves, so they never
+      // read as sticks or stones.
+      if (rx >= 10) ellipse(cx, cy, rx - 2, ry - 0.5, "#a4502b", ragged(0.55, 3));
+      for (let i = 0; i < rx * 3; i++) {
+        const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * 1.25;
+        const x = Math.round(cx + Math.cos(a) * d * rx), y = Math.round(cy + Math.sin(a) * d * (ry + 1));
+        if (!clear(x, y) && rx < 10) continue;
+        rect(x, y, 2, 1, colors[i % 4]);
+        if (i % 3 === 0) dot(x + 1, y - 1, colors[(i + 1) % 4]);
+      }
+    }
+    // A handful of single leaves blown across the grass.
+    for (let i = 0; i < 14; i++) {
+      const x = Math.round(20 + rand() * 130), y = Math.round(50 + rand() * 62);
+      if (!clear(x, y)) continue;
+      rect(x, y, 2, 1, colors[i % 4]);
+      dot(x + (i % 2), y - 1, colors[(i + 2) % 4]);
+    }
+  } else {
+    // A light snowfall settles in a few soft drifts: shaded underside, white top.
+    const drifts = [[18, 46, 14, 3], [62, 44, 11, 2.5], [128, 42, 16, 3], [148, 80, 9, 3], [50, 84, 10, 3],
+      [TREE.x + 18, TREE.y + 8, 9, 2.5], [96, 114, 13, 3], [14, 116, 9, 2.5], [150, 116, 8, 2.5]];
+    for (const [cx, cy, rx, ry] of drifts) {
+      if (inPondArea(cx, cy) || onPath(cx, cy)) continue;
+      ellipse(cx, cy + 1, rx, ry, FROST, ragged(0.3, 4));
+      ellipse(cx, cy, rx - 1, ry - 0.5, SNOW, ragged(0.35, 4));
+    }
+    // Snow along the fence rails, in clean continuous lines.
+    rect(0, 25, 160, 1, SNOW);
+    rect(0, 30, 160, 1, FROST);
+    // A thin rim of ice inside the pond's edge.
+    for (let a = 0; a < 180; a++) {
+      const ang = (a / 180) * Math.PI * 2;
+      dot(Math.round(POND.x + Math.cos(ang) * (POND.rx - 1)), Math.round(POND.y + Math.sin(ang) * (POND.ry - 1)), "#cfe4ee");
+    }
+  }
+  return canvas;
 }
 
 // Foreground bush and grass lip: always in front of the Pokémon.

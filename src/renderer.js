@@ -1,9 +1,11 @@
 import { assets } from "./assets.generated.js";
-import { drawBackground, drawForeground, drawTree, P, pen } from "./garden.js";
+import { drawBackground, drawForeground, drawSeasonGround, drawTree, P, pen } from "./garden.js";
 import { Ambient, GRADES, bitmap, drawBubble } from "./ambient.js";
 import { WORLD } from "./world.js";
 import { SPECIES } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
+import { DECOR_SLOTS } from "./keepsakes.js";
+import { VISITORS } from "./visitors.js";
 
 const ZZ = ["1111", "0010", "0100", "1111"];
 const ZZ_SMALL = ["111", "001", "010", "111"];
@@ -64,11 +66,36 @@ function drawPixels(c, rows, x, y, colors) {
   );
 }
 
-export function createRenderer(canvas, sprites, species, form = species) {
+// Small pixel keepsakes for the ones you set out in the garden.
+const DECOR = {
+  "green-leaf": [[".gg", "ggG", "Gg."], { g: "#62b05f", G: "#3f8a50" }],
+  blossom: [[".p.", "pyp", ".p."], { p: "#f4a6c0", y: "#f3d35a" }],
+  "red-leaf": [[".r.", "rRr", ".b."], { r: "#cf4f30", R: "#e5793c", b: "#7a4a2e" }],
+  acorn: [[".c.", "aaa", ".a."], { c: "#7a4a2e", a: "#b77a3e" }],
+  pinecone: [[".b.", "bwb", "bbb", ".b."], { b: "#8a5a34", w: "#f2f6ff" }],
+  pebble: [[".bbb.", "bbWbb", "bbbbb", ".bbb."], { b: "#7d93b0", W: "#e4ecf7" }],
+  shell: [["p.p.p", "ppppp", ".ppp.", "..p.."], { p: "#f7b9a3" }],
+  "lily-flower": [[".p.", "pwp", "ggg"], { p: "#f4a6c0", w: "#fbe3ea", g: "#4f9a52" }],
+  "sparkly-stone": [[".w.", "bBb", ".b."], { b: "#6c8fd6", B: "#a9c4ff", w: "#ffffff" }],
+  petal: [["pp", ".p"], { p: "#f4a6c0" }],
+  feather: [["..w", ".w.", "g.."], { w: "#f2efe6", g: "#9a8a72" }],
+  seed: [[".d", "dl"], { d: "#4a3b2c", l: "#d8c9a0" }],
+  snowdrop: [[".w.", "www", ".g."], { w: "#ffffff", g: "#4f9a52" }],
+};
+
+export function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}) {
   const c = canvas.getContext("2d");
   const background = drawBackground(),
-    tree = drawTree(),
     foreground = drawForeground();
+  // Seasonal layers are drawn once per season and cached, like the rest of the garden.
+  let season = null, tree = null, ground = null;
+  function setSeason(next = "summer") {
+    if (next === season) return;
+    season = next;
+    tree = drawTree(next);
+    ground = drawSeasonGround(next);
+  }
+  setSeason("summer");
   const ambient = new Ambient();
   const sp = SPECIES[species];
   let k = 1,
@@ -128,16 +155,61 @@ export function createRenderer(canvas, sprites, species, form = species) {
     drawPixels(c, rows, x, y, { b: P.berry, L: "#a9cdfb", g: P.leaf2 });
   }
 
-  function draw(pet, phase, reduced) {
+  // A dark one-pixel outline makes each keepsake read as an object, not a patch of ground.
+  function drawDecor(placed) {
+    placed.forEach((id, i) => {
+      const slot = DECOR_SLOTS[i], art = DECOR[id];
+      if (!slot || !art) return;
+      const [rows, colors] = art;
+      const x = Math.round(slot.x - rows[0].length / 2), y = Math.round(slot.y - rows.length + 1);
+      shadow(slot.x, slot.y, 3);
+      c.fillStyle = "#2c3a33";
+      rows.forEach((row, iy) => [...row].forEach((ch, ix) => {
+        if (colors[ch]) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) c.fillRect(x + ix + dx, y + iy + dy, 1, 1);
+      }));
+      drawPixels(c, rows, x, y, colors);
+    });
+  }
+  function drawVisitor(v, reduced) {
+    const sheets = visitorSprites[v.species];
+    if (!sheets) return;
+    if (VISITORS[v.species].pond) {
+      // Sunk in the water: only the back and fins show above the waterline, with a ring around it.
+      const sink = v.anim === "Hop" ? 4 : 13;
+      c.save();
+      c.beginPath();
+      c.rect(0, 0, WORLD.width, Math.round(v.y));
+      c.clip();
+      drawSprite(c, sheets, v.anim, v.clock, v.dir, v.x, v.y + sink, { reduced, k });
+      c.restore();
+      c.globalAlpha = 0.85;
+      for (let a = 0; a < 16; a++) {
+        const ang = (a / 16) * Math.PI * 2 + (reduced ? 0 : v.clock / 60);
+        c.fillStyle = P.water3;
+        c.fillRect(Math.round(v.x + Math.cos(ang) * 9), Math.round(v.y + Math.sin(ang) * 2.5), 1, 1);
+      }
+      c.globalAlpha = 1;
+      return;
+    }
+    if (!v.z) shadow(v.x, v.y, 4);
+    drawSprite(c, sheets, v.anim, v.clock, v.dir, v.x, v.y - (v.z || 0), { reduced, k });
+  }
+
+  function draw(pet, phase, reduced, nextSeason = season, extras = {}) {
+    setSeason(nextSeason);
     follow(pet, reduced || snapCamera);
     snapCamera = false;
     c.setTransform(k, 0, 0, k, -Math.round(view.x * k), -Math.round(view.y * k));
     c.imageSmoothingEnabled = false;
     for (const event of pet.drain()) ambient.handle(event, pet);
     c.drawImage(background, 0, 0);
+    c.drawImage(ground, 0, 0);
     ambient.drawBack(c, phase, reduced);
     // Depth-sort everything that stands on the ground.
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
+    if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
+    const visitor = extras.visitor;
+    if (visitor) items.push({ y: VISITORS[visitor.species].pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
     items.push({ y: pet.swimming ? pet.y - 6 : pet.y, draw: () => drawPet(pet, reduced) });
     if (pet.ball) items.push({ y: pet.ball.phase === "carried" ? pet.y + 0.5 : pet.ball.y, draw: () => drawBall(pet.ball, reduced) });
     if (pet.ball?.phase === "carried") bubbleLift = 9;
@@ -146,6 +218,7 @@ export function createRenderer(canvas, sprites, species, form = species) {
     items.sort((a, b) => a.y - b.y).forEach((item) => item.draw());
     c.drawImage(foreground, 0, 0);
     ambient.drawFront(c, phase, reduced);
+    if (extras.weather === "rain") ambient.drawRain(c, reduced);
     // Time-of-day grade over the whole scene, then lights that should glow through it.
     const grade = GRADES[phase];
     if (grade.tint) {
@@ -162,12 +235,14 @@ export function createRenderer(canvas, sprites, species, form = species) {
     ambient.drawLights(c, phase, flame, reduced);
     const bodyHeight = animMeta[pet.form || form].visualHeight || 22;
     if (pet.bubble) drawBubble(c, pet.bubble, pet.x, pet.y - Math.max(pet.swimming ? 20 : 26, bodyHeight + 4) - bubbleLift, pet.time, reduced);
-    if (pet.asleep && !reduced) {
+    if ((pet.drowsy ?? pet.asleep) && !reduced) {
       // Two little Zs drift up and fade.
       for (let i = 0; i < 2; i++) {
         const q = (pet.time * 0.45 + i * 0.5) % 1;
         c.globalAlpha = q < 0.75 ? 1 : (1 - q) / 0.25;
-        bitmap(c, q < 0.4 ? ZZ_SMALL : ZZ, Math.round(pet.x + 6 + q * 6), Math.round(pet.y - Math.max(18, bodyHeight - 4) - q * 12), "#fffdf3");
+        const zx = Math.round(pet.x + 6 + q * 6), zy = Math.round(pet.y - Math.max(18, bodyHeight - 4) - q * 12), z = q < 0.4 ? ZZ_SMALL : ZZ;
+        bitmap(c, z, zx + 1, zy + 1, "#2c3a33");
+        bitmap(c, z, zx, zy, "#fffdf3");
         c.globalAlpha = 1;
       }
     }
@@ -190,8 +265,11 @@ export function createRenderer(canvas, sprites, species, form = species) {
     toWorld(fx, fy) {
       return { x: view.x + fx * view.w, y: view.y + fy * view.h };
     },
-    tick(dt, phase, reduced) {
-      ambient.tick(dt, phase, reduced);
+    tick(dt, phase, reduced, nextSeason = season, weather = "clear") {
+      ambient.tick(dt, phase, reduced, nextSeason, weather);
+    },
+    get season() {
+      return season;
     },
     draw,
   };

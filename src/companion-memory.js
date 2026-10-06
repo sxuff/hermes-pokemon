@@ -1,4 +1,6 @@
 import { shouldGreet } from "./presence.js";
+import { isArrival, expectedNow, recordArrival } from "./rhythm.js";
+import { dueMilestone } from "./milestones.js";
 
 // Wall-clock presence and storage live outside the simulation. The pet only reports
 // meaningful moments; no position, animation frame, or particle is ever persisted.
@@ -28,6 +30,7 @@ export function createCompanionMemory({ store, species, pet, now = Date.now }) {
     const at = now(), patch = {};
     for (const event of events) {
       if (event.type === "favorite") patch.favoriteSpot = event.spot;
+      if (event.type === "keepsake") store.collect(species, event.id);
       if (event.type === "interaction") {
         store.awardXp(species, event.kind, at);
         patch.lastInteraction = { kind: event.kind, at };
@@ -45,10 +48,27 @@ export function createCompanionMemory({ store, species, pet, now = Date.now }) {
       const memory = store.getMemory(species);
       // Reserve the cooldown even if fetch delays the greeting. Brief tab switches,
       // hot reloads and a cancelled greeting must not repeatedly demand attention.
-      if (shouldGreet(memory, at) && pet.welcomeBack()) {
+      // At a usual time of day it is already waiting in its spot instead of walking over.
+      const greet = shouldGreet(memory, at);
+      if (greet && expectedNow(memory, at) && pet.awaitArrival?.()) {
+        store.remember(species, { lastGreetingAt: at });
+      } else if (greet && pet.welcomeBack()) {
         store.remember(species, { lastGreetingAt: at });
       }
-    } else { flush(); flushTogether(); }
+      present = value;
+      lastCheckpoint = at;
+      // Days together: start counting at the first visit (or the upgrade for older saves).
+      const met = memory.metAt || at;
+      const due = dueMilestone(met, memory.milestones, at);
+      if (due.celebrate) pet.queueMilestone?.(due.celebrate);
+      // Learn arrival times only after deciding, so today's visit never predicts itself.
+      // Folded into the presence write: learning a rhythm never costs an extra save.
+      const arrivals = isArrival(memory, at) ? recordArrival(store.getMemory(species).arrivals, at) : undefined;
+      store.remember(species, { lastSeenAt: at, metAt: met, milestones: due.celebrated, ...(arrivals ? { arrivals } : {}) });
+      flush();
+      return;
+    }
+    flush(); flushTogether();
     present = value;
     lastCheckpoint = at;
     store.remember(species, { lastSeenAt: at });

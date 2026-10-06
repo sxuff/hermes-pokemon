@@ -798,3 +798,15 @@
 .hp-memories dd { margin: 0; text-align: right; }
 .hp-memories time { display: block; color: var(--hp-muted); font-size: 9px; margin-top: 3px; }
 .hp-memories p { font-size: 10px; line-height: 1.6; color: var(--hp-muted); }
+.hp-season .hp-segmented button { padding-inline: 4px; font-size: 10px; }
+.hp-hemisphere { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; }
+.hp-keepsakes { margin: 4px 0 10px; }
+.hp-keepsakes .hp-label small { color: var(--hp-muted); font-weight: 400; margin-left: 6px; }
+.hp-keepsakes ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.hp-keepsakes li { font-size: 10px; padding: 3px 8px; border: 1px solid var(--hp-line); border-radius: 999px; }
+.hp-keepsakes > small { display: block; margin-top: 6px; font-size: 10px; color: var(--hp-muted); line-height: 1.5; }
+
+.hp-keepsakes li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.hp-place { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hp-line, rgba(0,0,0,.18)); background: transparent; color: inherit; cursor: pointer; }
+.hp-place[aria-pressed="true"] { background: var(--hp-accent-soft, rgba(95,154,79,.18)); }
+.hp-place:disabled { opacity: .45; cursor: default; }

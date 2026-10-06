@@ -10,7 +10,7 @@ async (page) => {
   await page.locator('.hp-stage').scrollIntoViewIfNeeded();
   check(await page.evaluate(()=>document.hasFocus()),'Preview lacks focus');
   const migrated=await page.evaluate(()=>__demo.diagnostics().saved);
-  check(migrated.version===4 && migrated.nickname==='Dario' && migrated.memories.charmander.favoriteSpot==='sun','Migration lost existing companion');
+  check(migrated.version===5 && migrated.nickname==='Dario' && migrated.memories.charmander.favoriteSpot==='sun','Migration lost existing companion');
   await page.waitForFunction(()=>__demo.diagnostics().saved.progression?.charmander?.xp===3,null,{timeout:75000});
   await page.getByRole('button',{name:'Pet',exact:true}).click();
   const xp=await page.evaluate(()=>__demo.diagnostics().saved.progression.charmander.xp);

@@ -2,12 +2,21 @@ import { loadSprites, createRenderer, drawSprite } from "./renderer.js";
 import { phaseForHour } from "./ambient.js";
 import { FORMS } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
+import { resolveSeason } from "./seasons.js";
+import { LONG_TURN_MS } from "./hermes.js";
+import { resolveWeather, isLateNight } from "./weather.js";
+import { Visitors, VISITORS } from "./visitors.js";
+
+async function loadVisitorSprites() {
+  const entries = await Promise.all(Object.keys(VISITORS).map(async (id) => [id, await loadSprites(id)]));
+  return Object.fromEntries(entries);
+}
 
 const FPS = 30,
   REDUCED_FPS = 8;
 
 // Each mounted canvas owns one scheduler. Visibility changes cancel the pending frame.
-export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
   let disposed = false,
     ready = false,
@@ -19,11 +28,24 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     draw,
     lastStatus = "",
     phase = "day",
+    currentSeason = "summer",
+    currentWeather = "clear",
     phaseCheck = 0;
+  const visitors = pet ? new Visitors() : null;
   const disposers = [];
   const updatePhase = () => {
     const setting = sky();
     phase = setting === "auto" ? phaseForHour(new Date().getHours() + new Date().getMinutes() / 60) : setting;
+    const s = season();
+    currentSeason = resolveSeason(s?.setting, s?.hemisphere);
+    currentWeather = resolveWeather(weather(), currentSeason);
+    if (pet) {
+      pet.season = currentSeason;
+      pet.weather = currentWeather;
+      pet.lateNight = isLateNight(new Date());
+      const ids = placed();
+      pet.placed = Array.isArray(ids) ? ids.filter((id) => pet.keepsakes.has(id)) : [];
+    }
   };
   function stop() {
     cancelAnimationFrame(frame);
@@ -39,7 +61,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     draw();
     memory?.flush();
     if (pet) {
-      const status = `${pet.state}:${pet.busy}:${pet.caption}:${pet.canEvolve}:${pet.evolving}`;
+      const status = `${pet.state}:${pet.busy}:${pet.caption}:${pet.canEvolve}:${pet.evolving}:${pet.keepsakes?.size}`;
       if (status !== lastStatus) {
         lastStatus = status;
         onStatus?.(pet);
@@ -58,6 +80,10 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     }
     if (pet) {
       pet.setReduced(reduced());
+      // A long turn is still running: come and sit with the user until it ends.
+      const now = bridge.activity.get();
+      if ((now.kind === "working" || now.kind === "waiting") && typeof now.since === "number" &&
+          (bridge.now?.() ?? Date.now()) - now.since >= LONG_TURN_MS) pet.beginCompany?.();
       // Fixed small steps keep motion identical regardless of frame pacing.
       let remaining = dt;
       while (remaining > 0) {
@@ -66,7 +92,14 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
         remaining -= s;
       }
     }
-    renderer?.tick(dt, phase, reduced());
+    renderer?.tick(dt, phase, reduced(), currentSeason, currentWeather);
+    if (visitors) {
+      visitors.tick(dt, { phase, season: currentSeason, weather: currentWeather, reduced: reduced() });
+      for (const event of visitors.drain()) {
+        if (event.type === "arrived") pet.watchVisitor(event);
+        else if (event.type === "splash") pet.emit("splash", { x: event.x, y: event.y });
+      }
+    }
     if (pet && active() && document.hasFocus()) memory?.tick?.(dt);
     memory?.checkpoint();
   }
@@ -113,19 +146,24 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
   window.addEventListener("pagehide", leave);
   function leave() { memory?.setPresent(false); }
   disposers.push(bridge.visible.subscribe(refresh));
+  if (pet && bridge.tool?.subscribe)
+    disposers.push(bridge.tool.subscribe(() => { if (active()) pet.reactToTool(bridge.tool.get().kind); }));
   if (pet)
     disposers.push(
       bridge.activity.subscribe(() => {
-        if (active()) pet.react(bridge.activity.get().kind);
+        const now = bridge.activity.get();
+        if (active()) pet.react(now.kind, now);
+        // A turn that ends while hidden must not leave the companion keeping company.
+        else if (!["working", "waiting"].includes(now.kind)) pet.endCompany?.();
       }),
     );
-  loadSprites(assetForm)
-    .then((sprites) => {
+  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites() : {}])
+    .then(([sprites, visitorSprites]) => {
       if (disposed) return;
       if (pet) {
-        renderer = createRenderer(canvas, sprites, species, assetForm);
+        renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
         renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
-        draw = () => renderer.draw(pet, phase, reduced());
+        draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, visitor: visitors?.current });
       } else {
         // Starter-card preview: idle with an occasional nod, a happy hop when chosen.
         const c = canvas.getContext("2d");
@@ -157,7 +195,9 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
       ready = true;
       if (pet) {
         pet.setReduced(reduced());
-        if (active()) pet.react(bridge.activity.get().kind);
+        const now = bridge.activity.get();
+        // Only ongoing work is replayed on load; a stale completion must not cheer again.
+        if (active() && ["working", "waiting"].includes(now.kind)) pet.react(now.kind, now);
       }
       onReady?.();
       refresh();
@@ -191,6 +231,17 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     toWorld: (fx, fy) => renderer?.toWorld(fx, fy) ?? { x: fx * 160, y: fy * 120 },
     get phase() {
       return phase;
+    },
+    get season() {
+      return currentSeason;
+    },
+    get weather() {
+      return currentWeather;
+    },
+    // Preview/testing only: start a specific visit now.
+    summonVisitor: (id) => visitors?.summon({ phase, season: currentSeason, weather: currentWeather }, id) ?? false,
+    get visitor() {
+      return visitors?.current ?? null;
     },
   };
 }

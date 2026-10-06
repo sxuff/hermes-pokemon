@@ -57,9 +57,15 @@ export class Ambient {
     this.fireflies = Array.from({ length: 7 }, (_, i) => ({ x: 10 + i * 21, y: 50 + ((i * 17) % 55), phase: i * 1.7 }));
     this.ripples = [];
     this.blooms = [];
+    this.floaters = [];
+    this.season = "summer";
+    this.weather = "clear";
+    // Fixed set of drops recycled forever: rain never allocates per frame.
+    this.drops = Array.from({ length: 34 }, () => ({ x: random() * 176, y: random() * 124, speed: 65 + random() * 35 }));
     this.nextRipple = 1;
     this.nextLeaf = 3;
     this.nextFish = 9;
+    this.nextFlake = 0.5;
   }
   spawn(p) {
     this.particles.push({ age: 0, vx: 0, vy: 0, ...p });
@@ -111,6 +117,16 @@ export class Ambient {
       case "leaves":
         for (let i = 0; i < 4; i++) this.spawnLeaf(x + (r() - 0.5) * 30, y + r() * 8, i * 0.4);
         break;
+      case "blossoms":
+        for (let i = 0; i < 9; i++)
+          this.spawn({ kind: "petal", x: x + (r() - 0.5) * 36, y: y + r() * 10, vx: 3 + r() * 4, vy: 5 + r() * 4, color: [P.pink, "#fde3ec"][i % 2], life: 3.2, delay: i * 0.25, drift: true });
+        break;
+      case "pond-leaf":
+        this.floaters.push({ x: x - 4, y, age: 0, life: 9, color: ["#cf6f30", "#e5993c", "#a4502b"][Math.floor(r() * 3)] });
+        this.floaters = this.floaters.slice(-3);
+        this.ripples.push({ x, y, age: 0, deliberate: true });
+        this.ripples = this.ripples.slice(-24);
+        break;
       case "embers":
         for (let i = 0; i < 8; i++)
           this.spawn({ kind: "ember", x: x + (r() - 0.5) * 4, y: y - 12, vx: (r() - 0.5) * 10, vy: -10 - r() * 10, life: 1 + r() * 0.6, delay: i * 0.05 });
@@ -126,13 +142,20 @@ export class Ambient {
     }
   }
   spawnLeaf(x, y, delay = 0) {
-    this.spawn({ kind: "leaf", x, y, vy: 7 + this.random() * 4, sway: this.random() * 6, life: 4.5, delay, land: 58 + this.random() * 18 });
+    const autumn = ["#cf6f30", "#e5993c", "#a4502b", "#f3c35a"];
+    const color = this.season === "autumn" ? autumn[Math.floor(this.random() * 4)] : this.season === "spring" && this.random() < 0.5 ? P.pink : null;
+    this.spawn({ kind: "leaf", x, y, vy: 7 + this.random() * 4, sway: this.random() * 6, life: 4.5, delay, land: 58 + this.random() * 18, color });
   }
-  tick(dt, phase, reduced = false) {
+  tick(dt, phase, reduced = false, season = this.season, weather = this.weather) {
+    this.season = season;
+    this.weather = weather;
     for (const bloom of this.blooms) bloom.age += dt;
     this.blooms = this.blooms.filter(bloom => bloom.age < bloom.life);
+    for (const f of this.floaters) f.age += dt;
+    this.floaters = this.floaters.filter((f) => f.age < f.life);
     for (const butterfly of this.butterflies) butterfly.ttl -= dt;
-    this.butterflies = this.butterflies.filter(b => b.ttl === Infinity ? phase !== "night" : b.ttl > 0);
+    // No resident butterfly in winter; a summoned one still visits briefly.
+    this.butterflies = this.butterflies.filter(b => b.ttl === Infinity ? phase !== "night" && season !== "winter" && weather !== "rain" : b.ttl > 0);
     if (reduced) {
       // Still garden: nothing drifts; reaction particles simply expire in place.
       for (const p of this.particles) {
@@ -149,10 +172,16 @@ export class Ambient {
       cloud.x += cloud.speed * dt;
       if (cloud.x > 170) cloud.x = -16;
     }
-    // Pond life: rings, an occasional fish.
+    if (weather === "rain")
+      for (const d of this.drops) {
+        d.y += d.speed * dt;
+        d.x -= d.speed * 0.18 * dt;
+        if (d.y > 124) { d.y -= 128; d.x = r() * 176; }
+      }
+    // Pond life: rings, an occasional fish. Rain dimples the water much more often.
     this.nextRipple -= dt;
     if (this.nextRipple <= 0) {
-      this.nextRipple = 1.6 + r() * 2.5;
+      this.nextRipple = weather === "rain" ? 0.15 + r() * 0.25 : 1.6 + r() * 2.5;
       const a = r() * Math.PI * 2,
         d = Math.sqrt(r()) * 0.7;
       this.ripples.push({ x: POND.x + Math.cos(a) * d * POND.rx, y: POND.y + Math.sin(a) * d * POND.ry, age: 0 });
@@ -170,8 +199,18 @@ export class Ambient {
     // Leaves drift from the tree now and then.
     this.nextLeaf -= dt;
     if (this.nextLeaf <= 0) {
-      this.nextLeaf = 5 + r() * 7;
+      // Autumn sheds often; the winter evergreen hardly at all.
+      this.nextLeaf = season === "autumn" ? 1.5 + r() * 2.5 : season === "winter" ? 25 + r() * 20 : 5 + r() * 7;
       this.spawnLeaf(TREE.x - 18 + r() * 36, TREE.canopyY + 6 + r() * 10);
+    }
+    // Gentle snowfall in winter: a handful of flakes, never a blizzard.
+    if (season === "winter") {
+      this.nextFlake -= dt;
+      if (this.nextFlake <= 0) {
+        this.nextFlake = 0.35 + r() * 0.45;
+        if (this.particles.filter((p) => p.kind === "snow").length < 28)
+          this.spawn({ kind: "snow", x: r() * 164 - 2, y: -2, vx: (r() - 0.5) * 3, vy: 6 + r() * 4, sway: r() * 6, life: 9 + r() * 6, land: 34 + r() * 82 });
+      }
     }
     for (const b of this.butterflies) {
       b.phase += dt;
@@ -179,7 +218,7 @@ export class Ambient {
       b.x += (home.x + Math.cos(b.phase * 1.3) * 12 - b.x) * Math.min(1, dt * 1.5);
       b.y += (home.y + Math.sin(b.phase * 2.1) * 6 - b.y) * Math.min(1, dt * 1.5);
     }
-    if (!this.butterflies.length && phase === "day") this.butterflies.push({ x: -8, y: 60, phase: 0, color: P.white, ttl: Infinity });
+    if (!this.butterflies.length && phase === "day" && season !== "winter" && weather !== "rain") this.butterflies.push({ x: -8, y: 60, phase: 0, color: P.white, ttl: Infinity });
     for (const f of this.fireflies) {
       f.phase += dt;
       f.x += Math.cos(f.phase * 0.7 + f.y) * dt * 4;
@@ -202,10 +241,14 @@ export class Ambient {
       } else if (p.kind === "spark") {
         p.vy += 50 * dt;
         p.vx *= 1 - dt * 2;
-      } else if (p.kind === "petal" || p.kind === "ember") p.vy += (p.kind === "petal" ? 20 : 2) * dt;
+      } else if (p.kind === "petal" && p.drift) p.x += Math.sin(p.age * 3) * dt * 6;
+      else if (p.kind === "petal" || p.kind === "ember") p.vy += (p.kind === "petal" ? 20 : 2) * dt;
       else if (p.kind === "leaf") {
         if (p.y >= p.land) p.vy = 0;
         p.x += Math.sin(p.age * 3 + p.sway) * dt * 8;
+      } else if (p.kind === "snow") {
+        if (p.y >= p.land) { p.vy = 0; p.vx = 0; }
+        else p.x += Math.sin(p.age * 1.7 + p.sway) * dt * 3;
       } else if (p.kind === "dust") p.vx *= 1 - dt * 5;
     }
     this.particles = this.particles.filter((p) => p.age < p.life);
@@ -259,6 +302,15 @@ export class Ambient {
       else rect(x, y - 6, 2, 2, P.pink);
       c.globalAlpha = 1;
     }
+    // Autumn leaves floating on the pond, turning slowly as they drift.
+    for (const f of this.floaters) {
+      const k = f.age / f.life;
+      c.globalAlpha = k > 0.8 ? (1 - k) / 0.2 : 1;
+      const x = Math.round(f.x + (reduced ? 0 : f.age * 1.1)), y = Math.round(f.y - 1 + (reduced ? 0 : Math.sin(f.age * 1.3) * 0.6));
+      rect(x, y, 3, 1, f.color);
+      dot(x + 1, y - 1, f.color);
+      c.globalAlpha = 1;
+    }
     // Lily pads bob a pixel; one has a flower.
     for (const [x, y, flower, i] of [
       [POND.x - 14, POND.y + 3, true, 0],
@@ -305,8 +357,8 @@ export class Ambient {
       dot(x + 2 + s, y - 2, P.grassLight);
       dot(x + s, y - 3, P.grassLighter);
     }
-    // Sun twinkles in Charmander's favorite patch.
-    if (phase === "day")
+    // Sun twinkles in Charmander's favorite patch (not on a winter day).
+    if (phase === "day" && this.season !== "winter")
       for (let i = 0; i < 3; i++) {
         const k = (t * 0.5 + i / 3) % 1;
         if (k < 0.25) {
@@ -360,8 +412,12 @@ export class Ambient {
       } else if (p.kind === "leaf") {
         c.globalAlpha = k > 0.8 ? (1 - k) / 0.2 : 1;
         const flip = Math.sin(p.age * 5 + p.sway) > 0;
-        rect(x, y, flip ? 2 : 1, 1, P.leaf3);
-        dot(x + (flip ? 0 : 1), y + 1, P.leaf2);
+        rect(x, y, flip ? 2 : 1, 1, p.color || P.leaf3);
+        dot(x + (flip ? 0 : 1), y + 1, p.color || P.leaf2);
+        c.globalAlpha = 1;
+      } else if (p.kind === "snow") {
+        c.globalAlpha = k > 0.85 ? (1 - k) / 0.15 : 0.95;
+        dot(x, y, "#ffffff");
         c.globalAlpha = 1;
       } else if (p.kind === "fish") {
         const arc = Math.sin(k * Math.PI) * 6;
@@ -383,6 +439,22 @@ export class Ambient {
         dot(x + 1, y - 1, b.color);
       }
     }
+  }
+  // Soft drizzle: a cool wash plus thin slanted streaks. Reduced motion shows still drops.
+  drawRain(c, reduced) {
+    c.globalCompositeOperation = "multiply";
+    c.fillStyle = "#c9d3e0";
+    c.fillRect(0, 0, 160, 120);
+    c.globalCompositeOperation = "source-over";
+    c.globalAlpha = 0.55;
+    c.fillStyle = "#e8f1ff";
+    for (const d of this.drops) {
+      const x = Math.round(d.x), y = Math.round(d.y);
+      // Longer, lighter streaks read as rain, distinct from the grass texture below.
+      if (reduced) c.fillRect(x, y, 1, 2);
+      else { c.fillRect(x, y, 1, 3); c.fillRect(x - 1, y + 3, 1, 2); }
+    }
+    c.globalAlpha = 1;
   }
   // Lights are added after the scene grade so they glow in the dark.
   drawLights(c, phase, glowSource, reduced) {
@@ -415,8 +487,10 @@ export class Ambient {
       c.globalAlpha = 1;
     };
     if (glowSource) glow(glowSource.x, glowSource.y, 16, "#ff9a3c", grade.glow * (0.85 + Math.sin(t * 9) * 0.08));
+    // Summer nights are firefly season; spring and autumn get a few, winter none.
+    const fireflies = this.weather === "rain" ? 0 : this.season === "summer" ? this.fireflies.length : this.season === "winter" ? 0 : 3;
     if (phase === "night" || phase === "dusk")
-      for (const f of this.fireflies) {
+      for (const f of this.fireflies.slice(0, fireflies)) {
         const on = (Math.sin(f.phase * 1.7) + 1) / 2;
         if (on < 0.35) continue;
         glow(f.x, f.y, 4, "#d9ff6b", grade.glow * on);

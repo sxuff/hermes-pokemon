@@ -59,9 +59,11 @@ test("success cheers, errors/interruption/replays do not; profile is checked", (
   assert.equal(f.bridge.activity.get().kind, "idle");
   f.emit("message.complete", { payload: { status: "complete" } });
   assert.equal(f.bridge.activity.get().kind, "completed");
+  // Errors and a user's Stop never cheer: they become a quiet "failed" cue instead.
   for (const status of ["error", "interrupted"]) {
     f.emit("message.complete", { payload: { status } });
-    assert.equal(f.bridge.activity.get().kind, "idle");
+    assert.equal(f.bridge.activity.get().kind, "failed");
+    assert.equal(f.bridge.activity.get().reason, status);
   }
 });
 test("clarify cue uses the documented tool event and ends only for its matching tool", () => {

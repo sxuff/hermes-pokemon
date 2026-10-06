@@ -165,7 +165,7 @@ h1 em {
 }
 .demo-events {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 5px;
 }
 .demo-events button {
@@ -175,7 +175,7 @@ h1 em {
   font-size: 9px;
   padding: 7px 4px;
 }
-#return {
+#return, #visitor {
   margin-top: 12px;
   padding: 6px 9px;
   border: 1px solid var(--line);

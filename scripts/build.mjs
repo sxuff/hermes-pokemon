@@ -31,6 +31,9 @@ const FORMS = [
 ];
 // These five original sets do not have the extended gesture sheets. Keep the
 // original art intact and explicitly reuse that form's Idle; never another Pokémon.
+// Wild visitors: a few small sheets each, never a companion.
+export const VISITORS = ["pidgey", "caterpie", "magikarp", "hoothoot"];
+const VISITOR_ANIMS = ["Idle", "Walk", "Hop"];
 const IDLE_ALIASES = ["Wake", "Laying", "Eat", "Nod", "Pose", "LookUp", "Sit", "DeepBreath"];
 const LIMITED_FORMS = new Set(["ivysaur", "venusaur", "charizard", "wartortle", "blastoise"]);
 
@@ -133,13 +136,14 @@ function visualHeight(png, width, height, frames, rows, offsets) {
 const assets = {},
   meta = {};
 const aliasStatements = [];
-for (const species of FORMS) {
+for (const species of [...FORMS, ...VISITORS]) {
+  const anims = VISITORS.includes(species) ? VISITOR_ANIMS : ANIMS;
   const base = `assets/sprites/${species}`;
   const xml = await readFile(`${base}/AnimData.xml`, "utf8");
   const shadowSize = Number(xml.match(/<ShadowSize>(\d+)<\/ShadowSize>/)?.[1] ?? 1);
   assets[species] = {};
   meta[species] = { shadowSize, visualHeight: 0, anims: {} };
-  for (const name of ANIMS) {
+  for (const name of anims) {
     if (LIMITED_FORMS.has(species) && IDLE_ALIASES.includes(name)) continue;
     const section = [...xml.matchAll(/<Anim>([\s\S]*?)<\/Anim>/g)]
       .map((m) => m[1])

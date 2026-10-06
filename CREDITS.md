@@ -16,6 +16,17 @@ The included original PNG sheets and animation XML come from [PMDCollab / Sprite
 | Wartortle | [sprite/0008](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0008) | CHUNSOFT | Core set |
 | Blastoise | [sprite/0009](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0009) | CHUNSOFT | Core set |
 
+### Wild visitors
+
+| Visitor | Source directory | Credited artist | Included sheets |
+| --- | --- | --- | --- |
+| Pidgey | [sprite/0016](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0016) | CHUNSOFT | Idle, Walk, Hop |
+| Caterpie | [sprite/0010](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0010) | CHUNSOFT | Idle, Walk, Hop |
+| Magikarp | [sprite/0129](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0129) | CHUNSOFT | Idle, Walk, Hop |
+| Hoothoot | [sprite/0163](https://github.com/PMDCollab/SpriteCollab/tree/29ba3aa2c026fffb47166d2ec647c47d1d9ff305/sprite/0163) | CHUNSOFT | Idle, Walk, Hop |
+
+These come from the same pinned commit. Only the three sheets above are included for each visitor, and all three are the original CHUNSOFT sheets according to each form's credit history. Pidgey's later community gestures are not included. Each `credits.txt` is preserved beside the sheets.
+
 **Full set:** Idle, Walk, Sleep, Wake, Laying, Hop, Eat, Nod, Pose, LookUp, Sit, Rotate, DeepBreath. **Core set:** Idle, Walk, Sleep, Hop, Rotate. Each included sheet is an unmodified `*-Anim.png` plus its matching `*-Shadow.png`. Only the `*-Anim.png` sheets are embedded in `plugin.js`; the shadow sheets are read at build time to find each frame's ground anchor (the white marker pixel), so sprites stand still on the ground even when a sheet shifts the body inside its frame.
 
 The pinned source does not include the eight extended gestures for the five core-set forms. For **each of Ivysaur, Venusaur, Charizard, Wartortle, and Blastoise**, `Wake → Idle`, `Laying → Idle`, `Eat → Idle`, `Nod → Idle`, `Pose → Idle`, `LookUp → Idle`, `Sit → Idle`, and `DeepBreath → Idle` explicitly reuse that same form's original Idle animation and timing. The generated code shares its image data by reference; there are no fabricated PNGs, substituted Pokémon, or altered XML files. Original Walk, Sleep, Hop, and Rotate remain distinct. Bulbasaur, Charmander, Squirtle, and Charmeleon retain all thirteen actual sheets.

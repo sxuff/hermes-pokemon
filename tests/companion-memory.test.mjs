@@ -10,7 +10,8 @@ function harness(saved) {
   const pet = { drainMemory: () => events.splice(0), welcomeBack: () => { greetings++; return true; } };
   const create = () => createCompanionMemory({ store, species: "bulbasaur", pet, now: () => clock });
   const controller = create();
-  return { controller, create, store, writes, events, get greetings() { return greetings; }, advance(ms) { clock += ms; }, get now() { return clock; } };
+  const start = new Date(clock);
+  return { controller, create, store, writes, events, arrivalDay: Math.floor((clock - start.getTimezoneOffset() * 60_000) / 86_400_000), arrivalMinute: start.getHours() * 60 + start.getMinutes(), get greetings() { return greetings; }, advance(ms) { clock += ms; }, get now() { return clock; } };
 }
 test("first visit, quick tab switches and reload do not manufacture a welcome", () => {
   const h = harness();
@@ -59,7 +60,7 @@ test("flush batches meaningful moments per species and never persists simulation
   const h = harness(); h.controller.setPresent(true);
   h.events.push({ type: "interaction", kind: "ball" }, { type: "favorite", spot: "shade" }, { type: "interaction", kind: "pet" });
   h.controller.flush();
-  assert.deepEqual(h.store.getMemory("bulbasaur"), { favoriteSpot: "shade", lastInteraction: { kind: "pet", at: h.now }, lastSeenAt: h.now, lastGreetingAt: 0 });
+  assert.deepEqual(h.store.getMemory("bulbasaur"), { favoriteSpot: "shade", lastInteraction: { kind: "pet", at: h.now }, lastSeenAt: h.now, lastGreetingAt: 0, keepsakes: [], arrivals: [[h.arrivalDay, h.arrivalMinute]], metAt: h.now, milestones: [], placed: [] });
   assert.equal(h.store.getMemory("squirtle").lastInteraction, null);
   assert.equal(h.store.getProgression("bulbasaur").xp, 10);
   assert.equal(h.store.getProgression("squirtle").xp, 0);

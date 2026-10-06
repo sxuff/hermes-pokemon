@@ -2,14 +2,24 @@ import { SPECIES } from "./species.js";
 import { signal } from "./signal.js";
 import { SPOTS } from "./world.js";
 import { progressionOf, canEvolve, rewardInteraction, advanceTogetherTime } from "./progression.js";
+import { SEASON_SETTINGS, HEMISPHERES } from "./seasons.js";
+import { isKeepsake, KEEPSAKE_COUNT, MAX_PLACED } from "./keepsakes.js";
+import { validArrival, recordArrival, MAX_ARRIVALS } from "./rhythm.js";
+import { WEATHER_SETTINGS } from "./weather.js";
 export const STORAGE_KEY = "companion";
-export const VERSION = 4;
+export const VERSION = 5;
 export const SKIES = ["auto", "dawn", "day", "dusk", "night"];
 export const DEFAULT_MEMORY = {
   favoriteSpot: null,
   lastInteraction: null,
   lastSeenAt: 0,
   lastGreetingAt: 0,
+  keepsakes: [],
+  arrivals: [],
+  // Local time you first met. Saves from before v0.6 start counting from the upgrade.
+  metAt: 0,
+  milestones: [],
+  placed: [],
 };
 export const DEFAULT_RECORD = {
   version: VERSION,
@@ -17,6 +27,9 @@ export const DEFAULT_RECORD = {
   nickname: "",
   motion: "system",
   sky: "auto",
+  season: "auto",
+  hemisphere: "north",
+  weather: "auto",
   memories: {},
   progression: {},
 };
@@ -26,6 +39,7 @@ const interactionKinds = ["pet", "ball", "berry", "call", "greeting"];
 
 export function validateMemory(raw) {
   const interaction = raw?.lastInteraction;
+  const keepsakes = Array.isArray(raw?.keepsakes) ? [...new Set(raw.keepsakes.filter(isKeepsake))].slice(0, KEEPSAKE_COUNT) : [];
   return {
     favoriteSpot: typeof raw?.favoriteSpot === "string" && Object.hasOwn(SPOTS, raw.favoriteSpot) ? raw.favoriteSpot : null,
     lastInteraction: interactionKinds.includes(interaction?.kind) && timestamp(interaction?.at)
@@ -33,6 +47,14 @@ export function validateMemory(raw) {
       : null,
     lastSeenAt: timestamp(raw?.lastSeenAt) ? raw.lastSeenAt : 0,
     lastGreetingAt: timestamp(raw?.lastGreetingAt) ? raw.lastGreetingAt : 0,
+    keepsakes,
+    arrivals: Array.isArray(raw?.arrivals) ? raw.arrivals.filter(validArrival).map(([d, m]) => [d, m]).slice(-MAX_ARRIVALS) : [],
+    metAt: timestamp(raw?.metAt) ? raw.metAt : 0,
+    milestones: Array.isArray(raw?.milestones)
+      ? [...new Set(raw.milestones.filter((d) => Number.isInteger(d) && d > 0 && d <= 36500))].sort((a, b) => a - b).slice(-64)
+      : [],
+    // Only keepsakes actually found can be set out in the garden.
+    placed: Array.isArray(raw?.placed) ? [...new Set(raw.placed.filter((id) => keepsakes.includes(id)))].slice(0, MAX_PLACED) : [],
   };
 }
 export function cleanName(value, species) {
@@ -48,7 +70,7 @@ export function cleanName(value, species) {
 }
 // Older saves gain memories in RAM. Write the migration only with a real change.
 export function validateRecord(raw) {
-  if (!raw || ![1, 2, 3, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
+  if (!raw || ![1, 2, 3, 4, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
   const species = knownSpecies(raw.species) ? raw.species : null;
   const memories = {};
   const progression = {};
@@ -62,6 +84,9 @@ export function validateRecord(raw) {
     nickname: cleanName(raw.nickname, species),
     motion: ["system", "reduced"].includes(raw.motion) ? raw.motion : "system",
     sky: SKIES.includes(raw.sky) ? raw.sky : "auto",
+    season: SEASON_SETTINGS.includes(raw.season) ? raw.season : "auto",
+    hemisphere: HEMISPHERES.includes(raw.hemisphere) ? raw.hemisphere : "north",
+    weather: WEATHER_SETTINGS.includes(raw.weather) ? raw.weather : "auto",
     memories,
     progression,
   };
@@ -114,6 +139,27 @@ export function createPersistence(storage) {
       const memory = validateMemory({ ...previous, ...patch });
       if (JSON.stringify(memory) === JSON.stringify(previous)) return false;
       return update({ memories: { ...memories, [species]: memory } });
+    },
+    collect(species, keepsake) {
+      if (!knownSpecies(species) || !isKeepsake(keepsake)) return false;
+      const owned = validateMemory(state.get().record.memories[species]).keepsakes;
+      if (owned.includes(keepsake)) return false;
+      return this.remember(species, { keepsakes: [...owned, keepsake] });
+    },
+    // Set a found keepsake out in the garden, or put it back on the shelf.
+    togglePlaced(species, keepsake) {
+      if (!knownSpecies(species)) return false;
+      const memory = validateMemory(state.get().record.memories[species]);
+      if (!memory.keepsakes.includes(keepsake)) return false;
+      const placed = memory.placed.includes(keepsake)
+        ? memory.placed.filter((id) => id !== keepsake)
+        : memory.placed.length < MAX_PLACED ? [...memory.placed, keepsake] : null;
+      return placed ? this.remember(species, { placed }) : false;
+    },
+    noteArrival(species, at) {
+      if (!knownSpecies(species)) return false;
+      const arrivals = validateMemory(state.get().record.memories[species]).arrivals;
+      return this.remember(species, { arrivals: recordArrival(arrivals, at) });
     },
     getProgression(species) {
       return progressionOf(knownSpecies(species) ? state.get().record.progression[species] : null, species);

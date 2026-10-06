@@ -32,7 +32,7 @@ async (page) => {
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
   await page.getByRole('button',{name:'Reset position',exact:true}).click();
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
-  await page.getByRole('checkbox').check();
+  await page.getByRole('checkbox',{name:/Extra quiet mode/}).check();
   await page.getByRole('button',{name:'Close settings'}).click();
   await page.getByRole('button',{name:'Reload plugin',exact:true}).click();
   await ready();
@@ -53,7 +53,7 @@ async (page) => {
   await page.getByRole('textbox').fill('Dario');
   await page.getByRole('button',{name:'Save',exact:true}).click();
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
-  await page.getByRole('checkbox').uncheck();
+  await page.getByRole('checkbox',{name:/Extra quiet mode/}).uncheck();
   await page.getByRole('button',{name:'Close settings'}).click();
   check(errors.length===0, errors.join('\n'));
   return {animatedStarters:true,pet:true,pageReloadPersistence:true,rename:true,reset:true,quietPreferencePersisted:true,narrow,bothThemes:true,bottomDock:true,errors};

@@ -32,19 +32,22 @@ test("selection, nickname and preference survive store reconstruction", () => {
   first.update({ species: "squirtle", nickname: "Pebble", motion: "reduced" });
   first.update({ sky: "night" });
   assert.deepEqual(createPersistence(storage).get().record, {
-    version: 4,
+    version: 5,
     species: "squirtle",
     nickname: "Pebble",
     motion: "reduced",
     sky: "night",
+    season: "auto",
+    hemisphere: "north",
+    weather: "auto",
     memories: {},
     progression: {},
   });
 });
 test("old saves migrate without losing the companion or the user's sky and motion", () => {
-  for (const version of [1, 2, 3]) {
+  for (const version of [1, 2, 3, 4]) {
     const record = validateRecord({ version, species: "charmander", nickname: "Dario", motion: "reduced", sky: "night" });
-    assert.deepEqual(record, { version: 4, species: "charmander", nickname: "Dario", motion: "reduced", sky: "night", memories: {}, progression: {} });
+    assert.deepEqual(record, { version: 5, species: "charmander", nickname: "Dario", motion: "reduced", sky: "night", season: "auto", hemisphere: "north", weather: "auto", memories: {}, progression: {} });
   }
   assert.equal(validateRecord({ version: 1, species: "bulbasaur" }).sky, "auto");
   assert.equal(validateRecord({ version: 2, species: "squirtle", sky: "midnight" }).sky, "auto");
@@ -61,7 +64,7 @@ test("loading an old save and making no-op updates never rewrites storage", () =
   assert.equal(notifications, 0);
   assert.equal(store.remember("charmander", { favoriteSpot: "sun", lastSeenAt: 1_000 }), true);
   assert.equal(storage.writes.length, 1);
-  assert.equal(storage.writes[0].version, 4);
+  assert.equal(storage.writes[0].version, 5);
   assert.equal(storage.writes[0].nickname, "Dario");
   assert.equal(store.remember("charmander", { lastSeenAt: 1_000, favoriteSpot: "sun" }), false);
   assert.equal(store.update({ sky: "night", motion: "reduced" }), false);
@@ -78,7 +81,7 @@ test("memories survive starter switches and reconstruction without crossing spec
   store.remember("squirtle", { favoriteSpot: "bank", lastInteraction: { kind: "ball", at: 9_000 } });
   const next = createPersistence(storage);
   assert.deepEqual(next.getMemory("charmander"), {
-    favoriteSpot: "sun", lastSeenAt: 8_000, lastGreetingAt: 5_000, lastInteraction: { kind: "berry", at: 7_000 },
+    ...DEFAULT_MEMORY, favoriteSpot: "sun", lastSeenAt: 8_000, lastGreetingAt: 5_000, lastInteraction: { kind: "berry", at: 7_000 },
   });
   assert.deepEqual(next.getMemory("squirtle"), {
     ...DEFAULT_MEMORY, favoriteSpot: "bank", lastInteraction: { kind: "ball", at: 9_000 },
@@ -161,17 +164,18 @@ test("storage failures leave the toy playable with an honest warning", () => {
 
 test("v3 memories and preferences survive the first progression write", () => {
   const memory = { favoriteSpot: "sun", lastInteraction: { kind: "berry", at: 1_000 }, lastSeenAt: 2_000, lastGreetingAt: 0 };
+  const upgraded = { ...memory, keepsakes: [], arrivals: [], metAt: 0, milestones: [], placed: [] };
   const storage = storageWith({ version: 3, species: "charmander", nickname: "Dario", motion: "reduced", sky: "night", memories: { charmander: memory } });
   const store = createPersistence(storage);
   assert.deepEqual(store.getProgression("charmander"), DEFAULT_PROGRESSION);
   assert.equal(storage.writes.length, 0);
   assert.equal(store.awardXp("charmander", "berry", 3_000), 5);
   const restored = createPersistence(storage);
-  assert.deepEqual(restored.getMemory("charmander"), memory);
+  assert.deepEqual(restored.getMemory("charmander"), upgraded);
   assert.equal(restored.get().record.nickname, "Dario");
   assert.equal(restored.get().record.motion, "reduced");
   assert.equal(restored.get().record.sky, "night");
-  assert.equal(restored.get().record.version, 4);
+  assert.equal(restored.get().record.version, 5);
   assert.equal(restored.getProgression("charmander").xp, 5);
 });
 

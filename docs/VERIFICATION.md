@@ -1,5 +1,71 @@
 # Verification
 
+## 0.6.0 (2026-10-06)
+
+Adds long-turn company and a bigger cheer, quiet reactions to failed turns with an occasional break offer, calendar seasons with a hemisphere setting and one seasonal habit per starter, 13 collectible keepsakes, and learned arrival times. v1–v4 saves migrate to version 5 with companion, nickname, settings, memories and growth preserved.
+
+### Executed automated checks
+
+`npm test`: **163 passed, 0 failed** (144 existing + 19 new in `tests/rhythm.test.mjs`). New coverage: the bridge's turn start time, long-turn threshold and error streak (success, focus change and replays reset or ignore it; a user's Stop never counts); company for all three starters, deferring to fetch without cancelling it; quiet failure reactions with no bubble or confetti; the break offer's streak, cooldown and reduced-motion rules, and waiting out a nap instead of waking it; month-to-season mapping for both hemispheres and pinned seasons; each starter's seasonal habit appearing in ordinary life; keepsake place/season rules, single collection, save validation and reload; arrival learning (one per day per window, three distinct days required, real absence required); and arrival learning folded into the existing presence write. A fuzz test mixes every new input with play across all seasons and checks walkability and bounded queues.
+
+Existing tests changed only where they hard-coded save version 4, the exact v4 memory shape, or the old rule that an error emits nothing. Errors and interruptions still never celebrate.
+
+Two defects found during this work were fixed before release. A long turn that started during fetch could leave the companion stuck in its final "presenting" label instead of sitting down. The break offer could also wait on that label. Both now defer only while a plan is still running.
+
+### Executed browser checks
+
+Chromium (Playwright headless shell 153), loading the built ESM plugin with the preview SDK. In one page session, `smoke.js`, `growth.js`, `xp.js`, `play.js`, `lifecycle.js` and the new `rhythm.js` **all passed**. The same five original scripts also passed against an unmodified v0.5.0 checkout as a baseline. Two original scripts needed selector-only updates: `smoke.js` now names the Extra quiet mode checkbox because Settings has a second checkbox, and `xp.js` expects the v5 save.
+
+| Check | Result |
+| --- | --- |
+| Seasons | October showed autumn on the calendar; the Southern Hemisphere option flipped it to spring; all four pinned seasons applied to the garden and companion; the setting and the v5 save persisted across reload |
+| Long turn | The labeled **Long turn** demo event (the preview clock jumps three minutes) brought the companion to sit beside you with the caption "Sitting with you while Hermes works on a long one"; Completed then produced the bigger cheer; a short turn still got the ordinary cheer |
+| Failed turns | One failure gave a quiet nod with no bubble; a second brought the ball over |
+| Keepsakes | A pond investigation found a Smooth pebble; Settings showed "1 / 13"; it survived reload |
+| Arrival rhythm | With three seeded earlier days at the current time and a 40-minute absence, the companion was already waiting in its favorite spot; Settings listed the learned time (seeded 9:00/9:05/9:10 displayed as 9:05 AM) |
+| Errors | No page errors during the run |
+
+The keepsake check uses the preview-only debug handle to force a find, because finds are deliberately rare. The arrival check seeds earlier days directly in the demo's own localStorage. Seasonal stills in `docs/images/season-*.png` are preview captures. They were reviewed and the ground details reworked once, because the first versions read as pixel noise.
+
+### Second batch: world and rhythm (same release)
+
+Adds tool-aware reactions, offline rainy days, late-night sleepiness, four wild visitors, keepsakes you can place in the garden, and day-count milestones. The save stays at version 5. New fields default safely: `weather` (setting), plus `metAt`, `milestones` and `placed` (per-species memories). `placed` only accepts keepsakes that were actually found.
+
+`npm test`: **186 passed, 0 failed** (163 above + 23 new in `tests/world-life.test.mjs`). New coverage:
+- **Tools:** tool-name mapping (unknown tools, `clarify` and replays never react); tool events never disturbing the working/waiting state; the 20-second cooldown; never interrupting fetch; extra quiet mode.
+- **Rain:** date-stable rain with no rain in winter and roughly the configured share over 1,000 days; each starter's rain habit; Charmander never basking in rain.
+- **Late night:** the 1am to 5am window; sleepy habits; dozing during late company; work cues not waking a dozing companion while a finished turn does; daytime life unchanged.
+- **Visitors:** eligibility by phase, season and weather; a full arrive, stay and leave cycle with minutes between visits; none in extra quiet mode; watching never preempting play.
+- **Decorations:** found-only placement, a 4-slot limit, persistence, and walkable slots.
+- **Milestones:** local calendar day counting; each milestone once; stale milestones recorded silently after long breaks; a milestone adding no save beyond an ordinary return; the celebration following the welcome-back greeting.
+- **Combined:** a fuzz run mixing all of these with play for all three starters.
+
+Four existing tests changed only to include the new default fields in exact-shape assertions.
+
+Browser (same Chromium setup): `smoke.js`, `growth.js`, `xp.js`, `play.js`, `lifecycle.js`, `rhythm.js` and the new `world.js` **all passed in one page session**. `world.js` covers:
+- **Tools:** the three simulated tool buttons producing scouting, curious and digging, and the cooldown holding.
+- **Visitors:** a summoned visitor arriving and being watched.
+- **Rain:** pinned rain applying, persisting and showing Squirtle puddling.
+- **Late night:** holding late-night on, a long turn dozing off with Zs, a Working cue not waking it, and Completed waking it into the proud cheer.
+- **Decorations:** placing two seeded keepsakes, the companion checking on one, and persistence.
+- **Milestones:** a save met 30 days ago celebrating "30 days together" once, with Settings showing "Days together 30".
+
+No page errors occurred. Late night is forced through the debug handle, because the runtime otherwise reads the real clock.
+
+Visual review of preview captures led to four fixes before release:
+- Magikarp first sat on top of the water. It now sinks below the waterline with a ripple ring.
+- Placed keepsakes blended into the path stones. They now have a dark outline and clearer shapes.
+- Sleep Zs were hard to see. They now have a dark outline.
+- Raindrops formed a regular grid. They are now longer, lighter and randomly spaced.
+
+Stills: `docs/images/rain.png`, `visitor.png`, `decorations.png`, `dozing.png`.
+
+The four visitor sprite sets add Idle, Walk and Hop sheets from the same pinned SpriteCollab commit (original CHUNSOFT sheets; see CREDITS.md). The bundle grew from 943 KB to 1,121 KB.
+
+### Native and release limits
+
+v0.6 uses the same documented SDK surface as v0.5: the same atoms and `message.complete`/`tool.*` events, plus the existing `status` field, which already distinguished errors from interruptions. Tool reactions read only `tool.start`'s `name`. The release introduces no model calls, runtime network access or agent behavior changes. None of the new behavior has been exercised in native Hermes yet. Native smoke-test items: real long turns; real error and interrupted statuses; real tool bursts; arrival learning and milestones across real days; natural rain days; and late-night behavior at real late hours. The catalog pull request stays a draft.
+
 ## 0.5.0 (2026-10-04)
 
 Adds local XP, levels and optional evolution through all three starter lines. v1–v3 saves migrate to version 4 with the existing companion, nickname, settings and memories preserved. Progression is separate for each starter lineage. The new forms retain their lineage's routines and use real bundled sprite sheets.

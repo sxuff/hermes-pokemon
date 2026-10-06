@@ -6,6 +6,11 @@ import { SKIES } from "./persistence.js";
 import { inPond, onTree, SPOTS } from "./world.js";
 import { createCompanionMemory } from "./companion-memory.js";
 import { levelFromXp, evolutionLevel, canEvolve, XP_PER_LEVEL, LEVEL_MAX } from "./progression.js";
+import { SEASON_SETTINGS, SEASON_NAMES, resolveSeason } from "./seasons.js";
+import { KEEPSAKES, KEEPSAKE_COUNT, MAX_PLACED } from "./keepsakes.js";
+import { WEATHER_SETTINGS, resolveWeather } from "./weather.js";
+import { daysTogether, milestoneName } from "./milestones.js";
+import { usualTimes } from "./rhythm.js";
 
 function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve }) {
   const [confirming, setConfirming] = useState(false);
@@ -54,14 +59,31 @@ function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve 
 
 const SPOT_NAMES = { shade: "Under the old tree", sun: "The sunny patch", bank: "Beside the pond", flowers: "By the flowers", meadow: "The quiet meadow" };
 const MOMENT_NAMES = { pet: "A little affection", ball: "A game of fetch", berry: "A berry shared", call: "Coming over to see you", greeting: "A welcome-back hello" };
-function MemoryNote({ memory }) {
+function MemoryNote({ memory, onPlace }) {
   const moment = memory.lastInteraction;
+  const usual = usualTimes(memory.arrivals || []);
+  const clock = (m) => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, Math.floor(m / 60), m % 60));
   return <div className="hp-memories" aria-label="Little things remembered">
     <span className="hp-eyebrow">LITTLE THINGS REMEMBERED</span>
     <dl><div><dt>Favorite nap spot</dt><dd>{SPOT_NAMES[memory.favoriteSpot] || "Still finding a favorite"}</dd></div>
       <div><dt>Last time together</dt><dd>{moment ? MOMENT_NAMES[moment.kind] : "Our story is just starting"}
         {moment && <time dateTime={new Date(moment.at).toISOString()}>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(moment.at)}</time>}
-      </dd></div></dl>
+      </dd></div>
+      <div><dt>Usually see you</dt><dd>{usual.length ? usual.map(clock).join(" · ") : "Still learning your rhythm"}</dd></div>
+      <div><dt>Days together</dt><dd>{memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0}
+        {memory.milestones.length > 0 && <small> · {milestoneName(memory.milestones.at(-1))} celebrated</small>}</dd></div></dl>
+    <div className="hp-keepsakes" aria-label="Keepsakes found together">
+      <span className="hp-label">Keepsakes <small>{memory.keepsakes.length} / {KEEPSAKE_COUNT}</small></span>
+      {memory.keepsakes.length
+        ? <ul>{memory.keepsakes.map((id) => {
+            const out = memory.placed.includes(id);
+            const full = !out && memory.placed.length >= MAX_PLACED;
+            return <li key={id}>{KEEPSAKES[id].label}
+              <button type="button" className="hp-place" aria-pressed={out} disabled={full} onClick={() => onPlace?.(id)}
+                title={full ? `Up to ${MAX_PLACED} can be in the garden at once` : undefined}>{out ? "In the garden" : "Place"}</button></li>;
+          })}</ul>
+        : <small>Nothing yet. Little things turn up when you explore the tree, pond and flowers together.</small>}
+    </div>
     <p>A familiar place and a few shared moments. No chores to keep up with.</p>
   </div>;
 }
@@ -280,6 +302,34 @@ function Settings({ record, store, onClose, onChange, pet }) {
         </div>
         <small>Clock follows your local time — dawn, day, dusk and a starry night.</small>
       </div>
+      <div className="hp-sky hp-season">
+        <span className="hp-label">Garden season</span>
+        <div className="hp-segmented" role="radiogroup" aria-label="Garden season">
+          {SEASON_SETTINGS.map((season) => (
+            <button key={season} type="button" role="radio" aria-checked={record.season === season} onClick={() => store.update({ season })}>
+              {season === "auto" ? "Calendar" : SEASON_NAMES[season]}
+            </button>
+          ))}
+        </div>
+        <small>
+          Calendar follows today’s date{record.season === "auto" ? ` (now ${SEASON_NAMES[resolveSeason("auto", record.hemisphere)].toLowerCase()})` : ""}.
+        </small>
+        <label className="hp-hemisphere">
+          <input type="checkbox" checked={record.hemisphere === "south"} onChange={(e) => store.update({ hemisphere: e.target.checked ? "south" : "north" })} />
+          <span>Southern Hemisphere seasons</span>
+        </label>
+      </div>
+      <div className="hp-sky hp-weather">
+        <span className="hp-label">Garden weather</span>
+        <div className="hp-segmented" role="radiogroup" aria-label="Garden weather">
+          {WEATHER_SETTINGS.map((weather) => (
+            <button key={weather} type="button" role="radio" aria-checked={record.weather === weather} onClick={() => store.update({ weather })}>
+              {{ auto: "Natural", clear: "Clear", rain: "Rain" }[weather]}
+            </button>
+          ))}
+        </div>
+        <small>Natural brings the odd drizzly day, picked from the date. No weather service{record.weather === "auto" ? ` (today: ${resolveWeather("auto", resolveSeason(record.season, record.hemisphere)) === "rain" ? "rain" : "clear"})` : ""}.</small>
+      </div>
       <label className="hp-motion">
         <input
           type="checkbox"
@@ -306,7 +356,7 @@ function Settings({ record, store, onClose, onChange, pet }) {
         Change starter
         <Icon name="arrow" size={15} />
       </button>
-      <MemoryNote memory={store.getMemory(record.species)} />
+      <MemoryNote memory={store.getMemory(record.species)} onPlace={(id) => store.togglePlaced(record.species, id)} />
       <p className="hp-fine">
         Sprites: CHUNSOFT + SpriteCollab contributors.
         <br />
@@ -321,15 +371,24 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   const canvas = useRef(),
     motion = useRef(reduced),
     sky = useRef(record.sky),
+    season = useRef({ setting: record.season, hemisphere: record.hemisphere }),
+    weather = useRef(record.weather),
+    placed = useRef([]),
     runtime = useRef(),
     settingsButton = useRef(),
     evolutionPosition = useRef();
   motion.current = reduced;
   sky.current = record.sky;
+  season.current = { setting: record.season, hemisphere: record.hemisphere };
+  weather.current = record.weather;
+  placed.current = store.getMemory(record.species).placed;
   const progress = store.getProgression(record.species);
   const form = formFor(record.species, progress.stage);
   const pet = useMemo(() => new Companion(record.species, Math.random, {
     favoriteSpot: store.getMemory(record.species).favoriteSpot, form,
+    keepsakes: store.getMemory(record.species).keepsakes,
+    placed: store.getMemory(record.species).placed,
+    season: resolveSeason(record.season, record.hemisphere),
     position: evolutionPosition.current?.species === record.species ? evolutionPosition.current : undefined,
   }), [record.species, form, store]);
   const memory = useRef();
@@ -354,6 +413,9 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       form,
       reduced: () => motion.current,
       sky: () => sky.current,
+      season: () => season.current,
+      weather: () => weather.current,
+      placed: () => placed.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
@@ -372,11 +434,12 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   // Opt-in development handle (set by the browser demo only); nothing is exposed in Hermes.
   useEffect(() => {
     const debug = globalThis.__hermesPokemonDebug;
-    if (debug && typeof debug === "object") debug.pet = pet;
+    if (debug && typeof debug === "object") { debug.pet = pet; debug.runtime = () => runtime.current; }
     return () => { if (debug?.pet === pet) delete debug.pet; };
   }, [pet]);
   // A new sky preference should show immediately, not at the next periodic check.
-  useEffect(() => runtime.current?.refresh(), [record.sky]);
+  const placedKey = placed.current.join(",");
+  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey]);
   const closeSettings = () => {
     setSettings(false);
     settingsButton.current?.focus();

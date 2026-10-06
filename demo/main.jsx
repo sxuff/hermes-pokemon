@@ -72,6 +72,11 @@ document.querySelectorAll("[data-event]").forEach((button) =>
       completed: "A turn just finished",
       waiting: "A clarification is waiting",
       idle: "Nothing to do. Just be.",
+      long: "Simulated: Hermes has been working for 3 minutes. Press Completed to finish it.",
+      failed: "Simulated: a turn ended with an error. Try it twice in a row.",
+      "tool-web": "Simulated: Hermes is searching the web. Reactions are spaced about 20 s apart.",
+      "tool-terminal": "Simulated: Hermes is running a command. Reactions are spaced about 20 s apart.",
+      "tool-files": "Simulated: Hermes is writing files. Reactions are spaced about 20 s apart.",
     }[button.dataset.event];
   }),
 );
@@ -115,6 +120,13 @@ function simulateReturn() {
   enable();
 }
 document.querySelector("#return").addEventListener("click", simulateReturn);
+document.querySelector("#visitor").addEventListener("click", () => {
+  const runtime = globalThis.__hermesPokemonDebug?.runtime?.();
+  const ok = runtime?.summonVisitor();
+  document.querySelector("#event-label").textContent = ok
+    ? `Simulated: a wild ${runtime.visitor.species[0].toUpperCase() + runtime.visitor.species.slice(1)} stops by.`
+    : "No visitor right now: it may be raining, winter daytime, extra quiet mode, or someone is already here.";
+});
 function simulateGrowth(evolution) {
   const label = document.querySelector("#growth-label");
   if (!storage.get("companion", null)?.species) {

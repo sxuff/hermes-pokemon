@@ -28,8 +28,28 @@ export function emit(type, payload, session = focusedSessionId.get()) {
   for (const fn of events.get(type) || [])
     fn({ type, payload, session_id: session, profile: "demo" });
 }
+// The preview's clock can jump forward so a "long turn" can be seen without waiting.
+let clockOffset = 0;
+const realNow = Date.now.bind(Date);
+Date.now = () => realNow() + clockOffset;
+export function skipAhead(ms) {
+  clockOffset += ms;
+}
 export function simulate(kind) {
-  if (kind === "working") busyBySession.set({ [focusedSessionId.get()]: true });
+  if (kind === "long") {
+    // Simulated: a turn started and has been running for three minutes.
+    busyBySession.set({});
+    busyBySession.set({ [focusedSessionId.get()]: true });
+    skipAhead(180_000);
+  } else if (kind.startsWith("tool-")) {
+    // Simulated: Hermes starts a tool while working.
+    busyBySession.set({ [focusedSessionId.get()]: true });
+    const name = { "tool-web": "web_search", "tool-terminal": "terminal", "tool-files": "write_file" }[kind];
+    emit("tool.start", { name, tool_id: `demo-${name}-${realNow()}` });
+  } else if (kind === "failed") {
+    busyBySession.set({});
+    emit("message.complete", { status: "error" });
+  } else if (kind === "working") busyBySession.set({ [focusedSessionId.get()]: true });
   else if (kind === "completed") {
     busyBySession.set({});
     emit("message.complete", { status: "complete" });

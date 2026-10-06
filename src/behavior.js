@@ -1,6 +1,12 @@
 import { FORMS, SPECIES } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
-import { HOME, POND, SPOTS, TREE, directionTo, findPath, inPond, nearestWalkable, walkable } from "./world.js";
+import { HOME, POND, SPOTS, TREE, directionTo, findPath, inPond, nearestWalkable, onTree, walkable } from "./world.js";
+import { findKeepsake, isKeepsake, KEEPSAKES, FIND_COOLDOWN } from "./keepsakes.js";
+import { SEASONS } from "./seasons.js";
+import { DECOR_SLOTS, MAX_PLACED } from "./keepsakes.js";
+import { TOOL_KINDS, TOOL_COOLDOWN } from "./tools.js";
+import { VISITORS } from "./visitors.js";
+import { milestoneName } from "./milestones.js";
 
 // Pure pet logic: no DOM, no drawing. A Companion is a small explicit state machine whose
 // states are driven by short plans (walk → turn → act). Interrupts replace the plan.
@@ -9,6 +15,13 @@ import { HOME, POND, SPOTS, TREE, directionTo, findPath, inPond, nearestWalkable
 const TICKS = 60; // SpriteCollab durations are in 1/60 s.
 const ACCEL = 80; // px/s²
 export const START = HOME;
+// Where it sits to keep you company during a long turn: just beside where you stand.
+export const COMPANY_SPOT = { x: HOME.x + 12, y: HOME.y - 6 };
+// Consecutive failed turns before it suggests a small break, and how rarely it may.
+export const BREAK_STREAK = 2;
+export const BREAK_COOLDOWN = 600;
+const onPlace = (p) => !p ? null : onTree(p) ? "tree" : inPond(p) ? "pond" :
+  Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10 ? "flowers" : null;
 export const CAPTIONS = {
   idle: "Taking it all in",
   walking: "Exploring the garden",
@@ -38,6 +51,28 @@ export const CAPTIONS = {
   inviting: "Brought a ball. Want to play?",
   investigating: "Taking a closer look with you",
   evolving: "Ready for a new chapter",
+  company: "Sitting with you while Hermes works on a long one",
+  proud: "That was a long one. Well done, both of you!",
+  steady: "Hmm, that one didn't land. Still here",
+  stopped: "Stopped. That's okay",
+  offering: "Rough patch? Maybe a little break",
+  treasure: "Found something! Keeping it safe",
+  expecting: "Right on time. Waiting in our usual spot",
+  blossoms: "Watching the blossoms drift down",
+  "tail-warming": "Keeping warm by its own tail flame",
+  "leaf-watching": "Watching leaves float on the pond",
+  "snow-watching": "Watching snowflakes melt on the water",
+  scouting: "Looking out over the fence while Hermes searches",
+  curious: "Curious about what Hermes is running",
+  digging: "Digging a little while Hermes writes",
+  puddling: "Splashing in the rain. Best day ever",
+  sheltering: "Keeping its flame dry under the tree",
+  soaking: "Turning its bulb up to the rain",
+  sleepy: "Yawning. It's getting late",
+  dozing: "Dozing off beside you. It's late",
+  visitor: "Watching a wild visitor",
+  admiring: "Checking on a keepsake",
+  milestone: "Another milestone together",
 };
 const FETCH = new Set(["chasing", "returning", "presenting"]);
 
@@ -56,6 +91,18 @@ export class Companion {
     this.memoryEvents = [];
     this.evolutionEvents = [];
     this.favoriteSpot = Object.hasOwn(SPOTS, options.favoriteSpot) ? options.favoriteSpot : null;
+    this.season = SEASONS.includes(options.season) ? options.season : "summer";
+    this.keepsakes = new Set(Array.isArray(options.keepsakes) ? options.keepsakes.filter(isKeepsake) : []);
+    this.nextFindAt = 20;
+    this.nextBreakAt = 0;
+    this.companyActive = false;
+    this.companyPending = false;
+    this.breakPending = false;
+    this.weather = "clear";
+    this.lateNight = false;
+    this.placed = Array.isArray(options.placed) ? options.placed.filter((id) => this.keepsakes.has(id)).slice(0, MAX_PLACED) : [];
+    this.nextToolAt = 0;
+    this.pendingMilestone = null;
     this.reset();
     if (this.favoriteSpot) Object.assign(this, SPOTS[this.favoriteSpot]);
     const position = options.position;
@@ -67,6 +114,9 @@ export class Companion {
     Object.assign(this, { x: HOME.x, y: HOME.y, dir: 0, speed: 0, path: [], plan: [], step: null });
     Object.assign(this, { ball: null, treat: null, bubble: null, swimming: false, state: "idle" });
     this.invitationActive = false;
+    this.companyActive = false;
+    this.companyPending = false;
+    this.breakPending = false;
     this.investigationTarget = null;
     this.lastAttention = this.time;
     // Resetting position must never let an invitation bypass its existing cooldown.
@@ -96,10 +146,18 @@ export class Companion {
       !this.inviting && !this.asleep && !this.evolutionEvents.length && !["waking", "swimming", "petting", "investigating", "eating"].includes(this.state);
   }
   get caption() {
+    if (this.state === "treasure" && this.lastFound) return `Found ${KEEPSAKES[this.lastFound].name}! Keeping it safe`;
+    if (this.state === "visitor" && this.visitor) return `Watching a wild ${VISITORS[this.visitor].name}`;
+    if (this.state === "admiring" && this.admiring) return `Checking on ${KEEPSAKES[this.admiring].name}`;
+    if (this.state === "milestone" && this.milestone) return `${milestoneName(this.milestone)}. Thank you for every day`;
     return CAPTIONS[this.state] || CAPTIONS.idle;
   }
   get asleep() {
     return this.state === "sleeping";
+  }
+  // Sleeping, or dozing beside you during a late long turn: both show drifting Zs.
+  get drowsy() {
+    return this.asleep || (this.state === "dozing" && this.anim?.name === "Sleep");
   }
   animLength(name, rate = 1) {
     const anim = animMeta[this.form].anims[name];
@@ -141,6 +199,9 @@ export class Companion {
         this.memoryEvents.push({ type: "favorite", spot: nearest.spot });
       }
     }
+    this.trimMemory();
+  }
+  trimMemory() {
     if (this.memoryEvents.length > 32) this.memoryEvents.splice(0, this.memoryEvents.length - 32);
   }
   say(kind, seconds = 1.8) {
@@ -186,14 +247,27 @@ export class Companion {
   // ---- autonomous life -------------------------------------------------------------------
   choose() {
     if (this.pendingGreeting) return this.beginGreeting();
+    if (this.pendingMilestone && !this.ball && !this.treat && !this.evolving && !this.swimming) return this.celebrateMilestone();
+    if (this.breakPending && !this.ball && !this.treat && !this.evolving && !this.swimming) return this.offerBreak();
+    if (this.companyPending || this.companyActive) return this.keepCompany();
     if (!this.reduced && !this.busy && !this.swimming && this.time >= this.nextInvitationAt && this.time - this.lastAttention >= 35) {
       this.invitationActive = true;
       this.nextInvitationAt = this.time + 120 + this.random() * 60;
       return this.start(this.invitationPlan());
     }
-    const r = this.random();
     let plan;
-    if (this.reduced) {
+    // Rain, late hours and keepsakes set out in the garden add their own small habits.
+    // The extra draw happens only when one applies, so ordinary days are unchanged.
+    if (!this.reduced && (this.weather === "rain" || this.lateNight || this.placed.length)) {
+      const q = this.random();
+      if (this.weather === "rain" && q < 0.35) plan = this.rainPlan();
+      else if (this.lateNight && q < 0.6) plan = q < 0.3 ? this.sleepyPlan() : this.napPlan(true);
+      else if (this.placed.length && q > 0.88) plan = this.decorPlan();
+    }
+    const r = this.random();
+    if (plan) {
+      // chosen above
+    } else if (this.reduced) {
       plan =
         r < 0.25
           ? this.napPlan(false)
@@ -235,6 +309,7 @@ export class Companion {
         { kind: "turn", dir: 0 },
       ];
     }
+    if (this.species === "charmander" && this.weather === "rain") return this.rainPlan();
     if (this.species === "charmander") {
       return [
         go,
@@ -284,6 +359,10 @@ export class Companion {
     ];
   }
   signaturePlan() {
+    if (this.random() < 0.5) {
+      const seasonal = this.seasonalPlan();
+      if (seasonal) return seasonal;
+    }
     if (this.species === "bulbasaur") {
       return [
         { kind: "walk", to: SPOTS.flowers, state: "walking" },
@@ -314,6 +393,107 @@ export class Companion {
       { kind: "pose", anim: "Nod", once: true, rate: 0.7, state: "rippling" },
       { kind: "call", fn: () => this.emit("pond-rings", { x: SPOTS.bank.x + 4, y: POND.y + POND.ry - 4 }) },
       { kind: "pose", anim: "Sit", duration: 2, state: "rippling" },
+      { kind: "turn", dir: 0 },
+    ];
+  }
+  // One small seasonal habit per starter, in the season that suits it.
+  seasonalPlan() {
+    if (this.species === "bulbasaur" && this.season === "spring") {
+      const spot = SPOTS.shade;
+      return [
+        { kind: "walk", to: spot, state: "walking" },
+        { kind: "turn", dir: directionTo(TREE.x - spot.x, TREE.y - spot.y), state: "blossoms" },
+        { kind: "call", fn: () => this.emit("blossoms", { x: TREE.x + 4, y: TREE.canopyY + 6 }) },
+        { kind: "pose", anim: "LookUp", duration: 3.2, state: "blossoms" },
+        { kind: "pose", anim: "Sit", duration: 3 + this.random() * 2, state: "blossoms" },
+        { kind: "turn", dir: 0 },
+      ];
+    }
+    if (this.species === "charmander" && this.season === "winter") {
+      return [
+        { kind: "turn", dir: 0, state: "tail-warming" },
+        { kind: "pose", anim: "Sit", duration: 1, state: "tail-warming" },
+        { kind: "call", fn: () => this.emit("warm") },
+        { kind: "pose", anim: "DeepBreath", once: true, rate: 0.7, state: "tail-warming" },
+        { kind: "call", fn: () => this.emit("embers") },
+        { kind: "pose", anim: "Sit", duration: 3.5, state: "tail-warming" },
+        { kind: "call", fn: () => this.emit("warm") },
+        { kind: "pose", anim: "Sit", duration: 2, state: "tail-warming" },
+      ];
+    }
+    if (this.species === "squirtle" && (this.season === "autumn" || this.season === "winter")) {
+      const state = this.season === "autumn" ? "leaf-watching" : "snow-watching";
+      const water = { x: SPOTS.bank.x, y: POND.y + POND.ry - 3 };
+      return [
+        { kind: "walk", to: SPOTS.bank, state: "walking" },
+        { kind: "turn", dir: 4, state },
+        { kind: "pose", anim: "Sit", duration: 2, state },
+        { kind: "call", fn: () => this.emit(this.season === "autumn" ? "pond-leaf" : "pond-rings", water) },
+        { kind: "pose", anim: "LookUp", duration: 2.4, state },
+        { kind: "pose", anim: "Nod", once: true, rate: 0.7, state },
+        { kind: "turn", dir: 0 },
+      ];
+    }
+    return null;
+  }
+  // Rainy days: each starter meets the rain in its own way.
+  rainPlan() {
+    if (this.species === "squirtle") {
+      const state = "puddling", to = SPOTS.meadow;
+      return [
+        { kind: "walk", to, state: "walking" },
+        { kind: "turn", dir: 0, state },
+        { kind: "pose", anim: "Hop", once: true, state },
+        { kind: "call", fn: () => this.emit("splash") },
+        { kind: "pose", anim: "Rotate", once: true, rate: 0.9, state },
+        { kind: "pose", anim: "Hop", once: true, rate: 1.1, state },
+        { kind: "call", fn: () => { this.emit("splash"); this.say("note", 1.4); } },
+        { kind: "pose", anim: "Idle", duration: 1.5, state },
+      ];
+    }
+    if (this.species === "charmander") {
+      const state = "sheltering", to = SPOTS.shade;
+      return [
+        { kind: "walk", to, state: "walking" },
+        { kind: "turn", dir: 0, state },
+        { kind: "pose", anim: "Sit", duration: 6 + this.random() * 4, state },
+        { kind: "call", fn: () => this.emit("warm") },
+        { kind: "pose", anim: "Sit", duration: 3, state },
+      ];
+    }
+    const state = "soaking", to = SPOTS.meadow;
+    return [
+      { kind: "walk", to, state: "walking" },
+      { kind: "turn", dir: 0, state },
+      { kind: "pose", anim: "LookUp", duration: 3.5, state },
+      { kind: "pose", anim: "DeepBreath", once: true, rate: 0.7, state },
+      { kind: "pose", anim: "LookUp", duration: 2.5, state },
+    ];
+  }
+  // Late at night: a slow yawn and a heavy nod, sometimes a nap right where it is.
+  sleepyPlan() {
+    const state = "sleepy";
+    return [
+      { kind: "turn", dir: 0, state },
+      { kind: "pose", anim: "DeepBreath", once: true, rate: 0.55, state },
+      { kind: "pose", anim: "Idle", duration: 1.2, state },
+      { kind: "pose", anim: "Nod", once: true, rate: 0.45, state },
+      ...(this.random() < 0.5 ? this.napPlan(false) : [{ kind: "pose", anim: "Idle", duration: 1.5, state }]),
+    ];
+  }
+  // Visit a keepsake you set out in the garden.
+  decorPlan() {
+    const index = Math.floor(this.random() * this.placed.length) % this.placed.length;
+    const id = this.placed[index], slot = DECOR_SLOTS[index];
+    if (!id || !slot) return [];
+    const state = "admiring";
+    const to = nearestWalkable({ x: slot.x + 7, y: slot.y });
+    return [
+      { kind: "call", fn() { this.admiring = id; } },
+      { kind: "walk", to, state: "walking" },
+      { kind: "turn", dir: directionTo(slot.x - to.x, slot.y - to.y), state },
+      { kind: "pose", anim: "Nod", once: true, rate: 0.7, state },
+      { kind: "pose", anim: "Idle", duration: 1.6, state },
       { kind: "turn", dir: 0 },
     ];
   }
@@ -353,28 +533,210 @@ export class Companion {
     ];
   }
   invitationPlan() {
+    return this.ballOfferPlan("inviting");
+  }
+  ballOfferPlan(state) {
     const gentle = this.species === "bulbasaur", playful = this.species === "squirtle";
     const near = { x: HOME.x + (gentle ? -6 : playful ? 6 : 0), y: HOME.y - 8 };
     const rollTime = gentle ? 1.2 : playful ? 0.9 : 0.7;
     return [
       { kind: "call", fn() { this.ball = { x: this.x, y: this.y, z: 22, spin: 0, phase: "carried", invitation: true }; } },
-      { kind: "walk", to: near, speed: SPECIES[this.species].speed * (gentle ? 0.9 : playful ? 1.05 : 1.2), state: "inviting" },
-      { kind: "turn", dir: 0, state: "inviting" },
+      { kind: "walk", to: near, speed: SPECIES[this.species].speed * (gentle ? 0.9 : playful ? 1.05 : 1.2), state },
+      { kind: "turn", dir: 0, state },
       { kind: "call", fn() {
         Object.assign(this.ball, { from: { x: this.x, y: this.y }, target: { x: this.x + 2, y: this.y + 4 }, phase: "invitation-lower", t: 0 });
       } },
-      { kind: "pose", anim: "Nod", once: true, rate: gentle ? 0.7 : 1.1, state: "inviting" },
+      { kind: "pose", anim: "Nod", once: true, rate: gentle ? 0.7 : 1.1, state },
       { kind: "call", fn() {
         const from = { x: this.ball.x, y: this.ball.y };
         Object.assign(this.ball, { from, target: { x: HOME.x, y: HOME.y + 6 }, phase: "invitation-roll", t: 0, rollTime });
       } },
-      { kind: "pose", anim: "LookUp", duration: rollTime + 0.25, state: "inviting" },
+      { kind: "pose", anim: "LookUp", duration: rollTime + 0.25, state },
       { kind: "call", fn: () => this.say("note", 1.6) },
-      ...(playful ? [{ kind: "pose", anim: "Rotate", once: true, rate: 0.85, state: "inviting" }] : []),
-      { kind: "pose", anim: gentle ? "Nod" : "Hop", once: true, rate: gentle ? 0.65 : playful ? 1 : 1.25, dir: 0, state: "inviting" },
-      { kind: "pose", anim: "Idle", duration: gentle ? 3.5 : 3, state: "inviting" },
+      ...(playful ? [{ kind: "pose", anim: "Rotate", once: true, rate: 0.85, state }] : []),
+      { kind: "pose", anim: gentle ? "Nod" : "Hop", once: true, rate: gentle ? 0.65 : playful ? 1 : 1.25, dir: 0, state },
+      { kind: "pose", anim: "Idle", duration: gentle ? 3.5 : 3, state },
       { kind: "call", fn() { this.ball = null; this.invitationActive = false; } },
       { kind: "pose", anim: "Idle", duration: 1.2, state: "idle" },
+    ];
+  }
+
+  // ---- Hermes rhythm: long turns, rough patches, usual arrivals -------------------------
+  // A long turn is running: come and sit beside you until it ends. Never interrupts play.
+  keepCompany() {
+    // Defer only while something is still running. Once a plan has ended (this.step is
+    // null) its last state label, e.g. "presenting", must not block forever.
+    if (this.step && (this.busy || this.swimming || this.asleep || this.inviting || this.greetingActive ||
+        ["petting", "waking", "eating", "investigating", "evolving"].includes(this.state))) {
+      this.companyPending = true;
+      return false;
+    }
+    const joining = !this.companyActive;
+    this.companyPending = false;
+    this.companyActive = true;
+    const state = "company";
+    const travel = joining && !this.reduced && Math.hypot(this.x - COMPANY_SPOT.x, this.y - COMPANY_SPOT.y) > 4;
+    // Very late, it may nod off right there beside you. A finished turn still wakes it to cheer.
+    const doze = this.lateNight && !this.reduced && !joining && this.random() < 0.4;
+    this.start([
+      ...(travel ? [{ kind: "walk", to: COMPANY_SPOT, state }] : []),
+      { kind: "turn", dir: 0, state },
+      ...(doze ? [] : [{ kind: "call", fn: () => this.say("dots", 2.4) }]),
+      { kind: "pose", anim: "Sit", duration: 5 + this.random() * 3, state },
+      ...(doze ? [
+        { kind: "pose", anim: "DeepBreath", once: true, rate: 0.55, state: "dozing" },
+        { kind: "pose", anim: "Laying", duration: 1.2, state: "dozing" },
+        { kind: "pose", anim: "Sleep", rate: 0.5, duration: 10 + this.random() * 6, state: "dozing" },
+      ] : this.reduced ? [] : [{ kind: "pose", anim: "Nod", once: true, rate: 0.6, state }]),
+    ]);
+    return true;
+  }
+  endCompany() {
+    const was = this.companyActive || this.companyPending;
+    this.companyActive = false;
+    this.companyPending = false;
+    return was;
+  }
+  // Called while a turn has run past LONG_TURN_MS. Idempotent; waits for play to finish.
+  beginCompany() {
+    if (this.companyActive || this.companyPending) return false;
+    this.companyPending = true;
+    if (this.step?.kind === "pose" && ["idle", "attentive", "walking", "resting", "basking", "watching", "sniffing", "playing",
+        "scouting", "curious", "digging", "visitor", "admiring", "soaking", "sleepy", "puddling", "sheltering"].includes(this.state) && !this.inviting)
+      this.keepCompany();
+    return true;
+  }
+  // Two errors in a row: bring the ball over, a small invitation to step away for a moment.
+  offerBreak() {
+    this.breakPending = false;
+    if (this.reduced || this.time < this.nextBreakAt) return this.choose();
+    this.nextBreakAt = this.time + BREAK_COOLDOWN;
+    this.invitationActive = true;
+    this.nextInvitationAt = Math.max(this.nextInvitationAt, this.time + 120);
+    this.start(this.ballOfferPlan("offering"));
+  }
+  // Arrived at your usual time: already waiting in its favorite spot, looking your way.
+  // Runs as the pane becomes visible, so the move happened off-screen: no travel shown.
+  awaitArrival() {
+    if (this.evolving || this.busy || this.swimming || this.inviting || this.greetingActive) return false;
+    const spot = SPOTS[this.favoriteSpot || SPECIES[this.species].favorite];
+    this.cancelGreeting();
+    this.remember("greeting");
+    Object.assign(this, { x: spot.x, y: spot.y, speed: 0, dir: 0 });
+    const state = "expecting";
+    this.start([
+      { kind: "pose", anim: "Sit", duration: 0.8, state },
+      { kind: "call", fn: () => this.say("heart", 1.8) },
+      { kind: "pose", anim: this.reduced ? "Idle" : "Nod", once: !this.reduced, duration: this.reduced ? 0.6 : undefined, state },
+      { kind: "pose", anim: "Sit", duration: 3, state },
+      { kind: "pose", anim: "Idle", duration: 1, state: "idle" },
+    ]);
+    return true;
+  }
+  // ---- what Hermes is doing, visitors, milestones -----------------------------------------
+  // A small gesture for the kind of tool Hermes started. Rare by design: tools come in bursts.
+  reactToTool(kind) {
+    if (!TOOL_KINDS.includes(kind) || this.reduced || this.time < this.nextToolAt) return false;
+    if (this.busy || this.swimming || this.asleep || this.inviting || this.greetingActive || this.pendingGreeting ||
+        ["petting", "waking", "eating", "investigating", "dozing", "treasure", "milestone", "offering", "proud", "celebrating", "steady", "stopped"].includes(this.state))
+      return false;
+    this.nextToolAt = this.time + TOOL_COOLDOWN;
+    const stay = this.companyActive;
+    const state = { web: "scouting", terminal: "curious", files: "digging" }[kind];
+    let plan;
+    if (kind === "web") {
+      const to = nearestWalkable({ x: Math.max(20, Math.min(140, this.x)), y: 47 });
+      plan = [
+        ...(stay ? [] : [{ kind: "walk", to, state }]),
+        { kind: "turn", dir: 4, state },
+        { kind: "pose", anim: "LookUp", duration: 2.2, state },
+      ];
+    } else if (kind === "terminal") {
+      plan = [
+        { kind: "turn", dir: 1, state },
+        { kind: "pose", anim: "Idle", duration: 0.6, state },
+        { kind: "turn", dir: 7, state },
+        { kind: "pose", anim: "Idle", duration: 0.6, state },
+        { kind: "turn", dir: 0, state },
+        { kind: "pose", anim: "Nod", once: true, rate: 0.8, state },
+      ];
+    } else {
+      plan = [
+        { kind: "turn", dir: 0, state },
+        { kind: "call", fn: () => this.emit("dust") },
+        { kind: "pose", anim: "Eat", duration: 1.6, rate: 0.9, state },
+        { kind: "call", fn: () => this.emit("dust") },
+        { kind: "pose", anim: "Nod", once: true, state },
+      ];
+    }
+    plan.push({ kind: "turn", dir: 0, state }, { kind: "pose", anim: "Idle", duration: 0.8, state: stay ? "company" : "idle" });
+    this.start(plan);
+    return true;
+  }
+  // A wild Pokémon stopped by: turn and watch it for a moment.
+  watchVisitor({ species, x, y } = {}) {
+    if (!Object.hasOwn(VISITORS, species) || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (this.busy || this.swimming || this.asleep || this.inviting || this.greetingActive || this.pendingGreeting || this.companyActive ||
+        ["petting", "waking", "eating", "investigating", "dozing", "treasure", "milestone", "offering", "proud", "celebrating"].includes(this.state))
+      return false;
+    this.visitor = species;
+    const state = "visitor";
+    this.start([
+      { kind: "turn", dir: directionTo(x - this.x, y - this.y), state },
+      { kind: "call", fn: () => this.say("!", 1) },
+      { kind: "pose", anim: "Idle", duration: 3, state },
+      ...(this.reduced ? [] : [{ kind: "pose", anim: "Nod", once: true, rate: 0.8, state }]),
+      { kind: "pose", anim: "Idle", duration: 1.5, state },
+      { kind: "turn", dir: 0 },
+    ]);
+    return true;
+  }
+  // Day 30, day 100, each year: queued so it never interrupts play or a greeting.
+  queueMilestone(days) {
+    if (!Number.isInteger(days) || days <= 0) return false;
+    this.pendingMilestone = days;
+    if (this.step?.kind === "pose" && ["idle", "attentive", "resting", "watching", "company"].includes(this.state) && !this.inviting && !this.busy && !this.swimming)
+      this.celebrateMilestone();
+    return true;
+  }
+  celebrateMilestone() {
+    const days = this.pendingMilestone;
+    this.pendingMilestone = null;
+    if (!days) return this.choose();
+    this.milestone = days;
+    const state = "milestone";
+    this.start([
+      { kind: "turn", dir: 0, state },
+      { kind: "call", fn: () => { this.say("heart", 2.4); this.emit("confetti", { y: this.y - 18 }); } },
+      ...(this.reduced ? [{ kind: "pose", anim: "Idle", duration: 2.5, state }] : [
+        { kind: "pose", anim: "Hop", once: true, state },
+        { kind: "pose", anim: "Pose", once: true, state },
+        { kind: "call", fn: () => this.emit("sparkle", { y: this.y - 12 }) },
+        { kind: "pose", anim: "Hop", once: true, rate: 1.2, state },
+      ]),
+      { kind: "pose", anim: "Idle", duration: 2, state },
+      { kind: "pose", anim: "Idle", duration: 0.5, state: "idle" },
+    ]);
+  }
+
+  // A keepsake, sometimes, from an investigation it shared with you.
+  keepsakeSteps(place) {
+    if (this.time < this.nextFindAt) return [];
+    const found = findKeepsake(place, this.season, this.keepsakes, this.random);
+    if (!found) return [];
+    this.nextFindAt = this.time + FIND_COOLDOWN;
+    const state = "treasure";
+    return [
+      { kind: "call", fn() {
+        this.keepsakes.add(found);
+        this.memoryEvents.push({ type: "keepsake", id: found });
+        this.trimMemory();
+        this.lastFound = found;
+        this.say("sparkle", 1.6);
+        this.emit("sparkle", { y: this.y - 8 });
+      } },
+      { kind: "pose", anim: this.reduced ? "Idle" : "Hop", once: !this.reduced, duration: this.reduced ? 1 : undefined, state },
+      { kind: "pose", anim: "Idle", duration: 1.2, state },
     ];
   }
 
@@ -475,7 +837,7 @@ export class Companion {
     this.say("heart", 1.6);
     this.emit("hearts", { count: Math.min(4, this.affection) });
     if (this.busy || this.swimming) return true; // Hearts decorate play but never break it.
-    const wake = this.asleep || this.state === "waking" ? [{ kind: "pose", anim: "Wake", once: true, dir: 0, state: "waking" }] : [];
+    const wake = this.asleep || this.state === "dozing" || this.state === "waking" ? [{ kind: "pose", anim: "Wake", once: true, dir: 0, state: "waking" }] : [];
     const happy =
       this.affection >= 3
         ? [
@@ -644,6 +1006,7 @@ export class Companion {
       plan.push({ kind: "call", fn: () => this.emit(this.species === "bulbasaur" ? "tend" : "petals", { ...SPOTS.flowers }) });
       plan.push({ kind: "pose", anim: this.species === "squirtle" ? "Hop" : "Nod", once: true, state });
     }
+    plan.push(...this.keepsakeSteps(kind));
     plan.push(
       { kind: "turn", dir: 0, state },
       { kind: "pose", anim: "Idle", duration: 0.7, state },
@@ -655,30 +1018,65 @@ export class Companion {
   }
   investigationGlance() {
     const point = this.investigationTarget;
+    const place = onPlace(point);
     return [
       { kind: "turn", dir: directionTo(point.x - this.x, point.y - this.y), state: "investigating" },
       { kind: "pose", anim: "Idle", duration: 1.2, state: "investigating" },
+      ...(place ? this.keepsakeSteps(place) : []),
       { kind: "call", fn() { this.investigationTarget = null; } },
       { kind: "pose", anim: "Idle", duration: 0.5, state: "idle" },
     ];
   }
-  react(kind) {
+  react(kind, info = {}) {
+    if (kind === "failed") return this.reactToFailure(info);
+    if (kind !== "working" && kind !== "waiting") this.endCompany();
+    const big = kind === "completed" && Boolean(info.long);
     const bubble = { working: "dots", completed: "sparkle", waiting: "?" }[kind];
     if (!bubble) return;
     this.lastAttention = this.time;
     if (this.greetingActive || this.inviting || this.evolving) return;
     if (this.bubble?.kind === "heart" && this.bubble.until > this.time) return;
-    this.say(bubble, kind === "working" ? 2.2 : 2);
+    // Let a dozing friend sleep through ongoing work; only the finish wakes it.
+    if (this.state === "dozing" && kind !== "completed") return;
+    this.say(bubble, kind === "working" ? 2.2 : big ? 2.6 : 2);
     if (kind === "completed") this.emit("confetti", { y: this.y - 18 });
+    if (big) this.emit("sparkle", { y: this.y - 12 });
     // A cue may decorate play, but it never cancels a fetch, treat, pet or nap.
     if (this.busy || this.swimming || this.asleep || ["petting", "waking", "investigating"].includes(this.state)) return;
-    const state = { working: "attentive", completed: "celebrating", waiting: "waiting" }[kind];
-    const plan = [{ kind: "turn", dir: 0, state }];
+    // Keeping company already faces you; a passing cue only refreshes the bubble.
+    if (this.companyActive && kind !== "completed") return;
+    const state = big ? "proud" : { working: "attentive", completed: "celebrating", waiting: "waiting" }[kind];
+    // Dozing beside you through a long turn: wake gently before cheering.
+    const plan = this.state === "dozing" ? [{ kind: "pose", anim: "Wake", once: true, dir: 0, state }] : [];
+    plan.push({ kind: "turn", dir: 0, state });
     if (kind === "working") plan.push({ kind: "pose", anim: "Nod", once: true, rate: 0.8, state }, { kind: "pose", anim: "Idle", duration: 1.2, state });
+    else if (big)
+      plan.push(
+        { kind: "pose", anim: "DeepBreath", once: true, state },
+        { kind: "call", fn: () => this.emit("confetti", { y: this.y - 18 }) },
+        { kind: "pose", anim: "Hop", once: true, state },
+        { kind: "pose", anim: "Hop", once: true, rate: 1.2, state },
+        { kind: "pose", anim: "Pose", once: true, state },
+        { kind: "pose", anim: "Idle", duration: 1, state },
+      );
     else if (kind === "completed")
       plan.push({ kind: "pose", anim: "Hop", once: true, state }, { kind: "pose", anim: "Pose", once: true, state });
     else plan.push({ kind: "pose", anim: "Idle", duration: 2, state });
     this.start(plan);
+  }
+  // A failed or stopped turn gets a quiet look and a nod: no bubble, no confetti.
+  reactToFailure({ reason = "error", streak = 0 } = {}) {
+    this.endCompany();
+    this.lastAttention = this.time;
+    if (reason === "error" && streak >= BREAK_STREAK && !this.reduced && this.time >= this.nextBreakAt) this.breakPending = true;
+    if (this.greetingActive || this.inviting || this.evolving) return;
+    if (this.busy || this.swimming || this.asleep || ["petting", "waking", "investigating", "eating"].includes(this.state)) return;
+    const state = reason === "interrupted" ? "stopped" : "steady";
+    this.start([
+      { kind: "turn", dir: 0, state },
+      { kind: "pose", anim: this.reduced ? "Idle" : "Nod", once: !this.reduced, rate: 0.6, duration: this.reduced ? 1 : undefined, state },
+      { kind: "pose", anim: "Idle", duration: 1.6, state },
+    ]);
   }
   setReduced(value) {
     if (this.reduced === value) return;
