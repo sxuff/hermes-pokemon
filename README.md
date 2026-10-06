@@ -1,4 +1,4 @@
-# Hermes Pokémon · 0.6.1
+# Hermes Pokémon · 0.6.2
 
 A small pixel-art garden beside your Hermes conversation. Choose Bulbasaur, Charmander, or Squirtle, give it a nickname, and spend a little time together.
 
@@ -115,7 +115,7 @@ npm run demo
 
 Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome, a **Long turn** (the preview clock jumps three minutes into a running turn) and a **Failed turn**, simulated **Web search**, **Terminal** and **Writing files** tool calls, and a **Wild visitor**. Seasons and weather can be pinned from Settings. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
 
-`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.6.1.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
+`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.6.2.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
 
 ## Hermes awareness & compatibility
 

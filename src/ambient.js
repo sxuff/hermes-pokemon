@@ -4,6 +4,8 @@ import { POND, TREE, SUN_PATCH } from "./world.js";
 // Living garden: everything that moves but isn't the Pokémon. Visual only — it never
 // influences behavior. Also owns short-lived particles requested by behavior events.
 
+const inPondPoint = (x, y) => ((x - POND.x) / (POND.rx - 3)) ** 2 + ((y - POND.y) / (POND.ry - 2)) ** 2 <= 1;
+const GLINTS = [[-14, -3, 3, 1.7], [-6, 3, 2, 2.3], [3, -5, 3, 1.4], [10, 2, 2, 2.0], [-1, 6, 2, 1.1], [14, -1, 2, 2.6]];
 export const PHASES = ["dawn", "day", "dusk", "night"];
 export function phaseForHour(hour) {
   if (hour >= 5 && hour < 8) return "dawn";
@@ -277,13 +279,13 @@ export class Ambient {
         }),
       );
     }
-    // Water shimmer: short highlights that slide and blink.
-    for (let i = 0; i < 6; i++) {
-      const k = (t * 0.6 + i * 0.37) % 1;
-      const x = Math.round(POND.x - 16 + ((i * 11) % 30) + k * 4),
-        y = POND.y - 6 + ((i * 5) % 13);
-      if (Math.sin(t * 2 + i * 1.9) > -0.3) rect(x, y, 3 + (i % 2), 1, P.water3);
-    }
+    // Water shimmer: a few short glints scattered across the water (deliberately not in a line),
+    // each drifting a little and blinking on its own rhythm.
+    GLINTS.forEach(([dx, dy, w, speed], i) => {
+      if (Math.sin(t * speed + i * 2.4) < 0.15) return;
+      const x = Math.round(POND.x + dx + Math.sin(t * 0.5 + i) * 1.5), y = POND.y + dy;
+      if (inPondPoint(x, y) && inPondPoint(x + w - 1, y)) rect(x, y, w, 1, P.water3);
+    });
     for (const ripple of this.ripples) {
       if (ripple.age < 0) continue;
       const k = reduced ? 0.5 : ripple.age / 1.6,
@@ -481,8 +483,15 @@ export class Ambient {
       rect(132, 5, 2, 2, "#dcd8bd");
       rect(134, 8, 1, 1, "#dcd8bd");
       // Moon on the water.
-      c.globalAlpha = 0.6;
-      for (let i = 0; i < 4; i++) rect(POND.x + 6 - i, POND.y - 4 + i * 2, 4 + i * 2 - (i > 1 ? 4 : 0), 1, "#f4f1d8");
+      // Moon on the water: a soft column of short glints under the moon, shimmering gently.
+      const widths = [4, 3, 5, 2, 3, 1];
+      widths.forEach((w, i) => {
+        const y = POND.y - 6 + i * 2;
+        const x = Math.round(129 - w / 2 + (reduced ? 0 : Math.sin(t * 1.3 + i * 1.7) * 0.8));
+        if (!inPondPoint(x, y) || !inPondPoint(x + w - 1, y)) return;
+        c.globalAlpha = 0.5 - i * 0.06;
+        rect(x, y, w, 1, "#f4f1d8");
+      });
       c.globalAlpha = 1;
     }
     if (!grade.glow) return;

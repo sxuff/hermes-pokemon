@@ -1,4 +1,6 @@
-Hermes Pokémon v0.6.1 makes the companion react to the rhythm of your Hermes work and brings the garden to life with seasons, weather and visitors, for Hermes Desktop 0.21.5+.
+Hermes Pokémon v0.6.2 makes the companion react to the rhythm of your Hermes work and brings the garden to life with seasons, weather and visitors, for Hermes Desktop 0.21.5+.
+
+**0.6.2:** fixes two night-time visual glitches: a hard dark line across the top of the tree and sky, and the pond's moon reflection and shimmer lining up into a stack of bars.
 
 **0.6.1:** rain now comes as short showers (3 to 6 minutes, at most three a day, fading in and out) instead of all-day rain, and the companion has more varied movement: eight extra gestures from the same pinned sprite source, no back-to-back repeated routines, and varied pacing.
 
@@ -20,6 +22,6 @@ Install with `hermes plugins install sxuff/hermes-pokemon`, or extract the ZIP's
 
 The release includes a SHA256 file for the ZIP. Runtime uses bundled assets, the documented Desktop SDK and the plugin's own storage. It has no model calls, credentials, backend or runtime network requests.
 
-An independent fan project. Original code is MIT; bundled CHUNSOFT Pokémon sprites and SpriteCollab community contributions retain their respective rights and are excluded from that license. See [CREDITS.md](https://github.com/sxuff/hermes-pokemon/blob/v0.6.1/CREDITS.md). The NousResearch catalog PR remains a draft and is subject to maintainer review.
+An independent fan project. Original code is MIT; bundled CHUNSOFT Pokémon sprites and SpriteCollab community contributions retain their respective rights and are excluded from that license. See [CREDITS.md](https://github.com/sxuff/hermes-pokemon/blob/v0.6.2/CREDITS.md). The NousResearch catalog PR remains a draft and is subject to maintainer review.
 
-Executed checks and native-versus-demo limits are recorded in [docs/VERIFICATION.md](https://github.com/sxuff/hermes-pokemon/blob/v0.6.1/docs/VERIFICATION.md).
+Executed checks and native-versus-demo limits are recorded in [docs/VERIFICATION.md](https://github.com/sxuff/hermes-pokemon/blob/v0.6.2/docs/VERIFICATION.md).

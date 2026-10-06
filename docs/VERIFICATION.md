@@ -1,5 +1,12 @@
 # Verification
 
+## 0.6.2 (2026-10-06)
+
+Native user report: a line above the fence and across the tree, and three odd bars on the pond, at night.
+- **Line:** the dawn/dusk/night sky deepening was a flat band over rows 0 to 21 drawn after the tree, so its bottom edge cut straight across the canopy. It is now a row-by-row fade over rows 0 to 29. Before and after night captures: the seam across the tree is gone, and tree brightness now changes smoothly from row to row.
+- **Pond:** six shimmer glints were laid out on a fixed stagger, and they lined up with the moon reflection into a staircase of bars. Glints are now scattered, clipped to the water and blink independently, and the moon reflection is a short, softer column under the moon. Captures read as scattered glints.
+- `npm test`: 189 passed. Browser: all 7 scripts pass.
+
 ## 0.6.1 (2026-10-06)
 
 Feedback after first use: all-day rain was too much and movement felt repetitive.

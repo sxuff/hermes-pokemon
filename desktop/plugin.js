@@ -1,4 +1,4 @@
-// Hermes Pokémon v0.6.1 — bundled sprites: CHUNSOFT and SpriteCollab contributors. See CREDITS.md.
+// Hermes Pokémon v0.6.2 — bundled sprites: CHUNSOFT and SpriteCollab contributors. See CREDITS.md.
 
 // src/plugin.jsx
 import * as sdk from "@hermes/plugin-sdk";
@@ -2230,6 +2230,8 @@ function drawForeground() {
 }
 
 // src/ambient.js
+var inPondPoint = (x, y) => ((x - POND.x) / (POND.rx - 3)) ** 2 + ((y - POND.y) / (POND.ry - 2)) ** 2 <= 1;
+var GLINTS = [[-14, -3, 3, 1.7], [-6, 3, 2, 2.3], [3, -5, 3, 1.4], [10, 2, 2, 2], [-1, 6, 2, 1.1], [14, -1, 2, 2.6]];
 function phaseForHour(hour) {
   if (hour >= 5 && hour < 8) return "dawn";
   if (hour >= 8 && hour < 18) return "day";
@@ -2492,11 +2494,11 @@ var Ambient = class {
         })
       );
     }
-    for (let i = 0; i < 6; i++) {
-      const k = (t * 0.6 + i * 0.37) % 1;
-      const x = Math.round(POND.x - 16 + i * 11 % 30 + k * 4), y = POND.y - 6 + i * 5 % 13;
-      if (Math.sin(t * 2 + i * 1.9) > -0.3) rect(x, y, 3 + i % 2, 1, P.water3);
-    }
+    GLINTS.forEach(([dx, dy, w, speed], i) => {
+      if (Math.sin(t * speed + i * 2.4) < 0.15) return;
+      const x = Math.round(POND.x + dx + Math.sin(t * 0.5 + i) * 1.5), y = POND.y + dy;
+      if (inPondPoint(x, y) && inPondPoint(x + w - 1, y)) rect(x, y, w, 1, P.water3);
+    });
     for (const ripple of this.ripples) {
       if (ripple.age < 0) continue;
       const k = reduced ? 0.5 : ripple.age / 1.6, rx = 2 + k * (ripple.big ? 10 : 6), ry = rx * 0.4;
@@ -2685,8 +2687,14 @@ var Ambient = class {
       rect(131, 3, 5, 9, "#f4f1d8");
       rect(132, 5, 2, 2, "#dcd8bd");
       rect(134, 8, 1, 1, "#dcd8bd");
-      c.globalAlpha = 0.6;
-      for (let i = 0; i < 4; i++) rect(POND.x + 6 - i, POND.y - 4 + i * 2, 4 + i * 2 - (i > 1 ? 4 : 0), 1, "#f4f1d8");
+      const widths = [4, 3, 5, 2, 3, 1];
+      widths.forEach((w, i) => {
+        const y = POND.y - 6 + i * 2;
+        const x = Math.round(129 - w / 2 + (reduced ? 0 : Math.sin(t * 1.3 + i * 1.7) * 0.8));
+        if (!inPondPoint(x, y) || !inPondPoint(x + w - 1, y)) return;
+        c.globalAlpha = 0.5 - i * 0.06;
+        rect(x, y, w, 1, "#f4f1d8");
+      });
       c.globalAlpha = 1;
     }
     if (!grade.glow) return;
@@ -2938,9 +2946,11 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
       c.globalCompositeOperation = "multiply";
       c.fillStyle = grade.tint;
       c.fillRect(0, 0, WORLD.width, WORLD.height);
-      c.globalAlpha = 0.55;
       c.fillStyle = grade.sky;
-      c.fillRect(0, 0, WORLD.width, 22);
+      for (let y = 0; y < 30; y++) {
+        c.globalAlpha = 0.55 * (1 - y / 30) ** 1.5;
+        c.fillRect(0, y, WORLD.width, 1);
+      }
       c.globalAlpha = 1;
       c.globalCompositeOperation = "source-over";
     }
@@ -4079,7 +4089,7 @@ function Settings({ record, store, onClose, onChange, pet }) {
           "Pok\xE9mon \xA9 Nintendo / Creatures / GAME FREAK.",
           /* @__PURE__ */ jsx("br", {}),
           "Independent fan project \xB7 v",
-          "0.6.1"
+          "0.6.2"
         ] })
       ]
     }
@@ -4261,7 +4271,7 @@ function App({ store, ctx, bridge }) {
       ] }),
       /* @__PURE__ */ jsxs("span", { className: "hp-version", children: [
         "v",
-        "0.6.1".split(".").slice(0, 2).join(".")
+        "0.6.2".split(".").slice(0, 2).join(".")
       ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "hp-scroll", children: [
@@ -4310,7 +4320,7 @@ var plugin_default = {
   defaultEnabled: true,
   register(ctx) {
     const style = document.createElement("style");
-    style.dataset.hermesPokemon = "0.6.1";
+    style.dataset.hermesPokemon = "0.6.2";
     style.textContent = styles_default;
     document.head.append(style);
     ctx.onDispose(() => style.remove());

@@ -225,9 +225,12 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
       c.globalCompositeOperation = "multiply";
       c.fillStyle = grade.tint;
       c.fillRect(0, 0, WORLD.width, WORLD.height);
-      c.globalAlpha = 0.55;
+      // Deepen the sky, fading out row by row so there is no seam across the tree or fence.
       c.fillStyle = grade.sky;
-      c.fillRect(0, 0, WORLD.width, 22);
+      for (let y = 0; y < 30; y++) {
+        c.globalAlpha = 0.55 * (1 - y / 30) ** 1.5;
+        c.fillRect(0, y, WORLD.width, 1);
+      }
       c.globalAlpha = 1;
       c.globalCompositeOperation = "source-over";
     }
