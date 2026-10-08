@@ -364,3 +364,7 @@ h1 em {
     display: block;
   }
 }
+#statusbar { display: inline-flex; align-items: center; min-height: 18px; color: var(--text); font: 11px system-ui, sans-serif; letter-spacing: 0; }
+#statusbar:empty::before { content: "YOUR LITTLE CORNER"; font: 7px monospace; letter-spacing: 1.3px; color: var(--muted); }
+#palette { display: flex; flex-wrap: wrap; gap: 6px; }
+#composer { width: 100%; margin-top: 8px; resize: none; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text); }

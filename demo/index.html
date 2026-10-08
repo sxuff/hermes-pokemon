@@ -56,6 +56,11 @@
           <button id="visitor">Wild visitor</button>
           <button id="milestone">Simulate day 100</button>
           <div class="demo-growth-tools">
+            <span class="simulation">SIMULATED PALETTE &amp; COMPOSER</span>
+            <div id="palette"></div>
+            <textarea id="composer" rows="1" aria-label="Simulated composer" placeholder="Simulated composer: the “?” bubble click puts the caret here"></textarea>
+          </div>
+          <div class="demo-growth-tools">
             <span class="simulation">SIMULATED GROWTH · DEMO ONLY</span>
             <div><button id="grow-level">Simulate a level</button><button id="grow-evolution">Preview evolution</button></div>
             <p id="growth-label" role="status">Try growing together. Your Hermes save is separate.</p>
@@ -78,7 +83,7 @@
       </section>
       <aside class="demo-pane" aria-label="Plugin preview">
         <div class="demo-pane-chrome">
-          <span><i></i><i></i><i></i></span><span>YOUR LITTLE CORNER</span
+          <span><i></i><i></i><i></i></span><span id="statusbar" aria-label="Simulated status bar"></span
           ><span>⠿</span>
         </div>
         <div id="plugin"></div>

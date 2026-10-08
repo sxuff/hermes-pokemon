@@ -826,3 +826,35 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Status-bar presence: a tiny sprite and what the companion is doing, docked away or not. */
+.hp-statusbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.hp-statusbar canvas {
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+  flex: none;
+}
+.hp-statusbar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hp-statusbar strong {
+  font-weight: 600;
+  margin-right: 4px;
+}

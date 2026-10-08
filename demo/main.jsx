@@ -22,6 +22,7 @@ const storage = {
   set: (key, value) =>
     localStorage.setItem(`hermes-pokemon.demo.${key}`, JSON.stringify(value)),
 };
+const keybinds = new Map();
 let dispose = () => {},
   enabled = false,
   generation = 0;
@@ -37,11 +38,37 @@ function enable() {
     storage,
     onDispose: (fn) => cleanups.push(fn),
     register(contribution) {
-      if (contribution.area !== "panes")
-        throw new Error("Unexpected contribution");
-      root.render(contribution.render());
-      cleanups.push(unmount);
-      return unmount;
+      if (contribution.area === "panes") {
+        root.render(contribution.render());
+        cleanups.push(unmount);
+        return unmount;
+      }
+      if (contribution.area === "statusBar.right" || contribution.area === "statusBar.left") {
+        // Simulated status bar in the pane chrome.
+        const slot = document.querySelector("#statusbar");
+        const barRoot = createRoot(slot);
+        barRoot.render(contribution.render());
+        const cleanup = () => barRoot.unmount();
+        cleanups.push(cleanup);
+        return cleanup;
+      }
+      if (contribution.area === "palette") {
+        const button = document.createElement("button");
+        button.textContent = contribution.data.label.replace("Hermes Pokémon: ", "");
+        button.dataset.command = contribution.data.id;
+        button.addEventListener("click", () => { contribution.data.run(); });
+        document.querySelector("#palette").append(button);
+        const cleanup = () => button.remove();
+        cleanups.push(cleanup);
+        return cleanup;
+      }
+      if (contribution.area === "keybinds") {
+        keybinds.set(contribution.data.id, contribution.data);
+        const cleanup = () => keybinds.delete(contribution.data.id);
+        cleanups.push(cleanup);
+        return cleanup;
+      }
+      throw new Error(`Unexpected contribution area: ${contribution.area}`);
     },
     onEvent(type, fn) {
       if (!events.has(type)) events.set(type, new Set());
@@ -95,6 +122,12 @@ document.querySelector("#width").addEventListener("input", (e) => {
 document.querySelector("#dock").addEventListener("click", (e) => {
   const bottom = document.body.classList.toggle("bottom-dock");
   e.target.textContent = bottom ? "Dock beside" : "Dock beneath";
+});
+document.addEventListener("demo:reveal-pane", () => {
+  visibility.set(true);
+  mount.style.visibility = "visible";
+  document.querySelector("#hide").textContent = "Hide pane";
+  document.querySelector("#event-label").textContent = "Simulated: the status bar brought the garden back.";
 });
 document.querySelector("#hide").addEventListener("click", (e) => {
   visibility.set(!visibility.get());
@@ -173,6 +206,7 @@ window.__demo = {
     enable();
   },
   setVisible: (value) => visibility.set(value),
+  keybinds: () => [...keybinds.values()].map((k) => ({ id: k.id, label: k.label, defaults: k.defaults })),
   diagnostics: () => ({
     enabled,
     generation,

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { SPECIES, FORMS, formFor } from "./species.js";
 import { Companion } from "./behavior.js";
 import { mountCanvas } from "./runtime.js";
+import { loadSprites } from "./renderer.js";
 import { SKIES } from "./persistence.js";
 import { inPond, onTree, SPOTS } from "./world.js";
 import { createCompanionMemory } from "./companion-memory.js";
@@ -400,6 +401,12 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   const memory = useRef();
   const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching, evolving: pet.evolving, canEvolve: pet.canEvolve });
   const [status, setStatus] = useState(snapshot);
+  // What the status bar and palette commands see while this garden is mounted.
+  const publish = () => ctx.live?.set({ pet, species: record.species, form, nickname: record.nickname, caption: pet.caption });
+  useEffect(() => {
+    publish();
+    return () => { if (ctx.live?.get()?.pet === pet) ctx.live.set(null); };
+  }, [pet, record.nickname, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
   const [settings, setSettings] = useState(false),
     [error, setError] = useState(""),
     [ready, setReady] = useState(false),
@@ -428,7 +435,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
-      onStatus: () => setStatus(snapshot()),
+      onStatus: () => { setStatus(snapshot()); publish(); },
       onEvolutionComplete: (position) => {
         evolutionPosition.current = { ...position, species: record.species };
         store.evolve(record.species);
@@ -461,6 +468,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   // One dispatch for clicks and keyboard activation: a point in the garden, and whether it is
   // the companion itself.
   function actAt(p, companion) {
+    // While Hermes has a question, tapping the companion also puts the caret in the composer.
+    if (companion && pet.state === "waiting") bridge.focusComposer?.();
     if (companion) pet.pet();
     else if (onTree(p)) { pet.investigate(p, "tree"); pet.emit("leaves", { x: p.x, y: p.y }); }
     else if (inPond(p)) { pet.investigate(p, "pond"); pet.emit("splash", { x: p.x, y: p.y + 2 }); }
@@ -567,6 +576,37 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
         {reduced && <p className="hp-fine hp-motion-note">Quiet motion is on</p>}
       </div>
     </div>
+  );
+}
+// Status-bar item: the companion's idle frame at 18px and what it is doing. Click to reveal the
+// pane. Renders nothing until a garden is mounted, so the bar stays clean before a starter is chosen.
+export function StatusItem({ live, bridge }) {
+  const state = useSignal(live);
+  const visible = useSignal(bridge.visible);
+  const ref = useRef();
+  const form = state?.form;
+  useEffect(() => {
+    if (!form || !ref.current) return;
+    let cancelled = false;
+    loadSprites(form).then((sprites) => {
+      const canvas = ref.current;
+      if (cancelled || !canvas) return;
+      const a = sprites.Idle, scale = Math.min(18 / a.height, 18 / a.width);
+      canvas.width = 18; canvas.height = 18;
+      const c = canvas.getContext("2d");
+      c.imageSmoothingEnabled = false;
+      const w = Math.round(a.width * scale), h = Math.round(a.height * scale);
+      c.drawImage(a.image, 0, 0, a.width, a.height, Math.floor((18 - w) / 2), 18 - h, w, h);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [form]);
+  if (!state) return null;
+  const caption = visible ? state.caption : "Resting while hidden";
+  return (
+    <button type="button" className="hp-statusbar" title={`${state.nickname}: ${caption}. Click to show the garden.`} aria-label={`${state.nickname}: ${caption}. Show the garden.`} onClick={() => bridge.revealPane?.()}>
+      <canvas ref={ref} aria-hidden="true" />
+      <span><strong>{state.nickname}</strong>{caption}</span>
+    </button>
   );
 }
 export function App({ store, ctx, bridge }) {

@@ -127,6 +127,14 @@ export function createHermesBridge(host, ctx, { now = Date.now } = {}) {
     elsewhere.clear();
     visible.clear();
   };
+  // Two explicit-user-action doors, both optional on older desktops: put the caret in the
+  // composer (the "?" bubble click) and bring the pane back from a collapsed zone.
+  const focusComposer = () => {
+    try { host?.composer?.focus?.(null); return typeof host?.composer?.focus === "function"; } catch { return false; }
+  };
+  const revealPane = () => {
+    try { host?.revealPane?.(PANE_ID); return typeof host?.revealPane === "function"; } catch { return false; }
+  };
   ctx.onDispose(dispose);
-  return { activity, tool, elsewhere, visible, dispose, now };
+  return { activity, tool, elsewhere, visible, dispose, now, focusComposer, revealPane };
 }

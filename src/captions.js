@@ -14,7 +14,7 @@ export const CAPTIONS = {
   petting: "That hit the spot!",
   attentive: "Keeping you company while Hermes works",
   celebrating: "A little cheer for a finished turn",
-  waiting: "Hermes has a question for you",
+  waiting: "Hermes has a question for you. Tap me to go answer it",
   chasing: "On a very important mission",
   returning: "Bringing it back!",
   presenting: "Brought it back. Again?",

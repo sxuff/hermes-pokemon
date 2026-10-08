@@ -15,6 +15,9 @@ function atom(value) {
   };
 }
 export const PANES_AREA = "panes";
+export const STATUSBAR_AREAS = { left: "statusBar.left", right: "statusBar.right" };
+export const PALETTE_AREA = "palette";
+export const KEYBINDS_AREA = "keybinds";
 const focusedSessionId = atom("demo-session"),
   busyBySession = atom({}),
   focusedSessionProfile = atom("demo");
@@ -22,6 +25,9 @@ export const visibility = atom(true);
 export const host = {
   state: { focusedSessionId, busyBySession, focusedSessionProfile },
   paneVisibility: () => visibility,
+  // Simulated composer and pane reveal: the demo page provides the targets.
+  composer: { focus: () => document.querySelector("#composer")?.focus() },
+  revealPane: () => document.dispatchEvent(new CustomEvent("demo:reveal-pane")),
 };
 export const events = new Map();
 export function emit(type, payload, session = focusedSessionId.get()) {
