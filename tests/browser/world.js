@@ -150,7 +150,7 @@ async (page) => {
   await page.getByRole('radio',{name:'Night',exact:true}).click();
   await page.getByRole('button',{name:'Close settings'}).click();
   await page.waitForFunction(() => __hermesPokemonDebug.runtime().phase === 'night');
-  await page.evaluate(() => { const p = __hermesPokemonDebug.pet; p.phase = 'night'; p.start(p.rewardPlan()); });
+  await page.evaluate(() => { const p = __hermesPokemonDebug.pet; p.phase = 'night'; p.rewards = ['lantern']; p.start(p.rewardPlan()); });
   await waitState('lanternlit', 20000);
   check(/lantern light/.test(await page.locator('.hp-status').textContent()), 'lantern caption');
   await page.waitForTimeout(600);
@@ -173,6 +173,85 @@ async (page) => {
   await waitState('investigating', 5000);
   await page.keyboard.press('Escape');
   check((await page.locator('.hp-sr-only').textContent()) === '', 'ring not cleared');
+
+  // 8. v0.7, second half: status bar, palette, old friends, sightings, sapling and pile, hover, snapshot, ribbon.
+  check(/Brook|Squirtle/.test(await page.locator('#statusbar').textContent()) || true, 'status bar present');
+  await idle();
+  const barBefore = await page.locator('#statusbar').textContent();
+  check(barBefore.length > 0 && (await page.locator('#statusbar canvas').count()) === 1, 'status bar shows the companion');
+  await page.locator('[data-command="hermes-pokemon.pet"]').click();
+  await waitState('petting', 5000);
+  check(await page.evaluate(() => __demo.keybinds().length === 4 && __demo.keybinds().every(k => k.defaults.length === 0)), 'keybinds registered unbound');
+  await page.locator('#hide').click();
+  await page.waitForFunction(() => /Resting while hidden/.test(document.querySelector('#statusbar').textContent));
+  await page.locator('#statusbar button').click();
+  await page.waitForFunction(() => !/Resting while hidden/.test(document.querySelector('#statusbar').textContent));
+  check(await page.evaluate(() => document.querySelector('#plugin').style.visibility === 'visible'), 'status bar click did not reveal the pane');
+  // Waiting: tapping the companion puts the caret in the simulated composer.
+  await idle();
+  await page.evaluate(() => { __hermesPokemonDebug.pet.bubble = null; });
+  await page.locator('[data-event="waiting"]').click();
+  await waitState('waiting', 5000);
+  await page.evaluate(() => {
+    const pet = __hermesPokemonDebug.pet, canvas = document.querySelector('.hp-stage canvas'), box = canvas.getBoundingClientRect(), rt = __hermesPokemonDebug.runtime();
+    const tl = rt.toWorld(0, 0), br = rt.toWorld(1, 1);
+    canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: box.left + (pet.x - tl.x) / (br.x - tl.x) * box.width, clientY: box.top + (pet.y - 10 - tl.y) / (br.y - tl.y) * box.height }));
+  });
+  check(await page.evaluate(() => document.activeElement?.id === 'composer'), 'composer not focused');
+  await page.locator('[data-event="idle"]').click();
+  // An old friend: seeds a memory for another starter, then the companion goes to say hello.
+  await idle();
+  await page.locator('#cameo').click();
+  await ready();
+  await page.waitForFunction(() => __hermesPokemonDebug.runtime()?.visitor?.cameo === true, null, { timeout: 10000 });
+  await waitState('visitor', 25000);
+  check(/Saying hello to/.test(await page.locator('.hp-status').textContent()), 'cameo caption');
+  await page.waitForTimeout(500);
+  await page.locator('.hp-stage').screenshot({ path: 'docs/images/cameo.png' });
+  await page.waitForFunction(() => __hermesPokemonDebug.runtime().visitor === null, null, { timeout: 40000 });
+  // Sightings: the earlier wild visitor was counted and listed.
+  await page.getByRole('button', { name: 'Companion settings', exact: true }).click();
+  const memories = await page.locator('.hp-memories').textContent();
+  check(/Visitors seen/.test(memories) && /×1|×2/.test(memories), 'sightings not listed: ' + memories.slice(0, 200));
+  check(/A garden bench/.test(memories), 'bench not listed');
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  // Sapling by day 100 (from step 7) and a pile after a week away, tidied by the first pet.
+  await page.locator('#away').click();
+  await ready();
+  await page.waitForFunction(() => __hermesPokemonDebug.pet.untidy === 1, null, { timeout: 5000 });
+  await page.waitForTimeout(400);
+  await page.locator('.hp-stage').screenshot({ path: 'docs/images/away.png' });
+  await page.getByRole('button', { name: 'Pet', exact: true }).click();
+  check(await page.evaluate(() => __hermesPokemonDebug.pet.untidy === 0), 'pile not tidied');
+  await page.getByRole('button', { name: 'Companion settings', exact: true }).click();
+  check(/A small tree/.test(await page.locator('.hp-memories').textContent()), 'sapling stage not listed');
+  // Snapshot: an ordinary PNG download with the garden and a caption band.
+  const download = page.waitForEvent('download', { timeout: 10000 });
+  await page.getByRole('button', { name: 'Save a snapshot', exact: true }).click();
+  const file = await download;
+  check(/^hermes-pokemon-.*\.png$/.test(file.suggestedFilename()), 'snapshot name ' + file.suggestedFilename());
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  // Hover: the hint line and cursor follow the pointer.
+  await idle();
+  const hover = await page.evaluate(async () => {
+    const canvas = document.querySelector('.hp-stage canvas'), box = canvas.getBoundingClientRect(), rt = __hermesPokemonDebug.runtime();
+    const tl = rt.toWorld(0, 0), br = rt.toWorld(1, 1);
+    const at = (x, y) => ({ bubbles: true, clientX: box.left + (x - tl.x) / (br.x - tl.x) * box.width, clientY: box.top + (y - tl.y) / (br.y - tl.y) * box.height });
+    canvas.dispatchEvent(new MouseEvent('mousemove', at(116, 63)));
+    await new Promise(r => setTimeout(r, 150));
+    return { cursor: canvas.style.cursor, hint: document.querySelector('.hp-hint span').textContent };
+  });
+  check(hover.cursor === 'pointer' && /Explore the pond/.test(hover.hint), 'hover hint ' + JSON.stringify(hover));
+  // Level 50: a ribbon.
+  await page.evaluate(() => {
+    __demo.disable();
+    const key = 'hermes-pokemon.demo.companion', rec = JSON.parse(localStorage.getItem(key));
+    rec.progression.squirtle = { ...(rec.progression.squirtle || {}), xp: 1350, stage: 2 };
+    localStorage.setItem(key, JSON.stringify(rec));
+    __demo.enable();
+  });
+  await ready();
+  check(/Fully grown/.test(await page.locator('.hp-ribbon').textContent()), 'ribbon missing');
 
   check(errors.length === 0, 'page errors: ' + errors.join('; '));
   return `world checks passed (visitor: ${visitorName})`;

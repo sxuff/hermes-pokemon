@@ -38,13 +38,16 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
   const visitors = pet ? new Visitors() : null;
   // Starters you have raised before, fixed at mount so their sheets are loaded once.
   const cameoList = pet ? (Array.isArray(cameos()) ? cameos() : []) : [];
+  visitors?.setCameos(cameoList);
   const disposers = [];
   const updatePhase = () => {
     const setting = sky(), s = season(), date = new Date();
     currentSeason = resolveSeason(s?.setting, s?.hemisphere);
     // Day length follows the season, and the moon keeps its real phase.
     phase = setting === "auto" ? phaseForHour(date.getHours() + date.getMinutes() / 60, currentSeason) : setting;
-    renderer?.setMoon(moonPhase(date), s?.hemisphere === "south");
+    // The preview's golden-image checks pin the moon; Hermes never sets this.
+    const pinnedMoon = globalThis.__hermesPokemonDebug?.moon;
+    renderer?.setMoon(Number.isFinite(pinnedMoon) ? pinnedMoon : moonPhase(date), s?.hemisphere === "south");
     currentWeather = resolveWeather(weather(), currentSeason);
     if (pet) {
       pet.season = currentSeason;
@@ -175,7 +178,9 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     .then(([sprites, visitorSprites]) => {
       if (disposed) return;
       if (pet) {
-        renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
+        // The preview can seed the garden's randomness for repeatable pictures; Hermes never does.
+        const seeded = globalThis.__hermesPokemonDebug?.random;
+        renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites, typeof seeded === "function" ? { random: seeded } : {});
         renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
         draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus(), sapling: currentSapling });
       } else {

@@ -3,12 +3,12 @@
 // Each script is the same `async (page) => {…}` function that `@playwright/cli run-code` accepts,
 // so the two ways of running them stay interchangeable.
 import { spawn } from "node:child_process";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
 
 const PORT = Number(process.env.PORT || 4173);
 const ORIGIN = `http://127.0.0.1:${PORT}/`;
-const ORDER = ["smoke", "growth", "xp", "play", "lifecycle", "rhythm", "world"];
+const ORDER = ["smoke", "growth", "xp", "play", "lifecycle", "rhythm", "world", "golden"];
 const names = process.argv.slice(2).filter((name) => ORDER.includes(name));
 const scripts = names.length ? names : ORDER;
 
@@ -22,6 +22,15 @@ async function waitForServer(url, attempts = 50) {
   throw new Error(`The demo server did not answer at ${url}`);
 }
 
+// Golden images: tests/browser/golden.js compares the live canvas with tests/goldens/*.png and,
+// with UPDATE_GOLDENS=1, rewrites them from what it sees.
+globalThis.__goldens = {
+  update: process.env.UPDATE_GOLDENS === "1",
+  async write(name, dataUrl) {
+    await mkdir("tests/goldens", { recursive: true });
+    await writeFile(`tests/goldens/${name}.png`, Buffer.from(dataUrl.split(",")[1], "base64"));
+  },
+};
 const server = spawn(process.execPath, ["scripts/serve.mjs"], { env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "inherit", "inherit"] });
 let browser, failed = false;
 try {

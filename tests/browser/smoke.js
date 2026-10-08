@@ -27,7 +27,7 @@ async (page) => {
   await ready();
   check(await page.evaluate(() => __demo.diagnostics().saved.nickname==='Dario' && __hermesPokemonDebug.pet.species==='charmander'), 'Selection did not persist');
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
-  await page.getByRole('textbox').fill('Dario Jr');
+  await page.getByRole('textbox', {name: 'Nickname'}).fill('Dario Jr');
   await page.getByRole('button',{name:'Save',exact:true}).click();
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
   await page.getByRole('button',{name:'Reset position',exact:true}).click();
@@ -50,7 +50,7 @@ async (page) => {
   await page.locator('#width').fill('370');
   await page.locator('#width').dispatchEvent('input');
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
-  await page.getByRole('textbox').fill('Dario');
+  await page.getByRole('textbox', {name: 'Nickname'}).fill('Dario');
   await page.getByRole('button',{name:'Save',exact:true}).click();
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
   await page.getByRole('checkbox',{name:/Extra quiet mode/}).uncheck();

@@ -3159,7 +3159,7 @@ var PILE_ART = [
   [["....oO....", "...oOOb...", "..oObOOb..", ".oOobOoOb.", "boOobOboObb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }]
 ];
 var LANTERN_LIGHT = { x: REWARDS.lantern.x, y: 36, r: 11, color: "#ffb347", strength: 0.8 };
-function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}) {
+function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}, { random = Math.random } = {}) {
   const c = canvas.getContext("2d");
   const background = drawBackground(), foreground = drawForeground();
   let season = null, tree = null, ground = null;
@@ -3170,7 +3170,7 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
     ground = drawSeasonGround(next);
   }
   setSeason("summer");
-  const ambient = new Ambient();
+  const ambient = new Ambient(random);
   const sp = SPECIES[species];
   let k = 1, bubbleLift = 0, snapCamera = true;
   const view = { x: 0, y: 0, w: WORLD.width, h: WORLD.height };
@@ -3606,12 +3606,14 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
   let disposed = false, ready = false, frame = 0, last = 0, pending = 0, inView = false, renderer, draw, lastStatus = "", phase = "day", currentSeason = "summer", currentWeather = "clear", currentSapling = 0, phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
   const cameoList = pet ? Array.isArray(cameos()) ? cameos() : [] : [];
+  visitors?.setCameos(cameoList);
   const disposers = [];
   const updatePhase = () => {
     const setting = sky(), s = season(), date = /* @__PURE__ */ new Date();
     currentSeason = resolveSeason(s?.setting, s?.hemisphere);
     phase = setting === "auto" ? phaseForHour(date.getHours() + date.getMinutes() / 60, currentSeason) : setting;
-    renderer?.setMoon(moonPhase(date), s?.hemisphere === "south");
+    const pinnedMoon = globalThis.__hermesPokemonDebug?.moon;
+    renderer?.setMoon(Number.isFinite(pinnedMoon) ? pinnedMoon : moonPhase(date), s?.hemisphere === "south");
     currentWeather = resolveWeather(weather(), currentSeason);
     if (pet) {
       pet.season = currentSeason;
@@ -3744,7 +3746,8 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
   Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites(cameoList) : {}]).then(([sprites, visitorSprites]) => {
     if (disposed) return;
     if (pet) {
-      renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
+      const seeded = globalThis.__hermesPokemonDebug?.random;
+      renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites, typeof seeded === "function" ? { random: seeded } : {});
       renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
       draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus(), sapling: currentSapling });
     } else {

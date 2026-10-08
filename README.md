@@ -39,8 +39,11 @@ The plugin uses the public [Desktop Plugin SDK](https://github.com/NousResearch/
 - **Click the grass** to call it over. Click the tree, pond or flowers to investigate together, with a different little reaction from each starter.
 - **Ball** throws a Poké Ball. It bounces and rolls; your Pokémon chases it, carries it back, then pauses proudly to present it.
 - **Berry** drops an Oran Berry nearby; your Pokémon looks up in anticipation, nods, walks over and eats it.
+- **Hover** over the Pokémon, the tree, the pond, the flowers or the grass and the cursor and the hint line say what a click there would do.
 - **Keyboard**: Tab to the garden, then use the arrow keys to move a small ring between your Pokémon, the tree, the pond, the flowers and the meadow. Enter or Space does what a click there would do; Escape clears the ring. A screen reader hears each choice.
-- **Settings**: rename, change starter, reset position, **garden light** (follow your clock, or pin dawn/day/dusk/night), **season**, **weather**, and extra quiet motion. System reduced motion is always respected. Escape closes settings.
+- **Command palette**: *Show the garden*, *Pet*, *Throw the ball* and *Give a berry* are palette commands, with keybinds you can assign in Hermes settings (none are bound by default).
+- **Status bar**: a tiny sprite and what your companion is doing sit in the Hermes status bar, even while the pane is docked away. Click it to bring the garden back.
+- **Settings**: rename, change starter, reset position, **save a snapshot** (a PNG of the garden with a small caption, downloaded like any file), **garden light** (follow your clock, or pin dawn/day/dusk/night), **season**, **weather**, and extra quiet motion. System reduced motion is always respected. Escape closes settings.
 
 ## Life in the garden
 
@@ -68,13 +71,17 @@ The garden itself moves: clouds drift, the pond shimmers and ripples (watch for 
 
 **Late nights.** Between 1am and 5am your companion gets sleepy: slow yawns, heavy nods and more naps. Keeping you company through a long turn that late, it may doze off right beside you. Work cues let it sleep; a finished turn wakes it to cheer.
 
-**Wild visitors.** Every few minutes a wild Pokémon may stop by: a Pidgey lands by the fence, a Caterpie inches along the flower bed, a Magikarp surfaces in the pond, or a Hoothoot comes out at night. Each suits its season and time of day, none come in the rain, and your companion turns to watch. Visitors are just passing through; there is still one companion.
+**Wild visitors.** Every few minutes a wild Pokémon may stop by: a Pidgey lands by the fence, a Caterpie inches along the flower bed, a Magikarp surfaces in the pond, or a Hoothoot comes out at night. Each suits its season and time of day, none come in the rain, and your companion turns to watch, in its own way: Squirtle splashes hello to a Magikarp and ducks into its shell at a Pidgey, Charmander stamps at a Caterpie and lights up for a Hoothoot, Bulbasaur sits down to make friends with a Caterpie. Settings keeps a **sightings log** of who has visited and how often. Visitors are just passing through; there is still one companion.
+
+**Old friends.** If you have raised another starter before, it may drop in for a cameo at the form it reached, walking in by the flowers and staying a while. Your companion goes over for a hop hello. Cameos are not wild sightings and are never logged.
+
+**A sapling that grows.** After your first week together a sprout appears by the fence. It becomes a sapling at two weeks, a small tree at day 60, a leafy tree at day 200, and from the first anniversary it blossoms each spring. Nothing to water; it just grows with the days. Come back after a week or more away and a few leaves have gathered by the path; your first pet or call scatters them. A sign of time passed, never a chore.
 
 **Your rhythm.** Your companion learns when you usually arrive. After the same time of day on three different days, it's already waiting for you in its favorite spot when you come back then, instead of walking over. Settings shows the usual times it has learned.
 
 Each starter quietly remembers a favorite resting spot learned from your interactions, the last thing you did together, its keepsakes, and your usual arrival times. It returns to that spot on a later visit and uses it for naps. Settings shows these small memories; there are no hunger meters or chores.
 
-Species, nickname, motion, garden light, season, hemisphere, weather, per-species memories (including placed keepsakes and days together) and growth persist across reloads. Older saves migrate automatically. Exact position and transient reactions are not saved.
+Species, nickname, motion, garden light, season, hemisphere, weather, per-species memories (including placed keepsakes, days together and the sightings log) and growth persist across reloads. Older saves migrate automatically. Exact position and transient reactions are not saved.
 
 ## XP & evolution
 
@@ -100,6 +107,8 @@ Evolution is **optional**. When ready, choose the evolution offer, preview the n
 
 All nine forms, and the four wild visitors (Idle, Walk and Hop only), use bundled real sprite sheets. Some evolved forms have fewer source poses and reuse their own idle pose for unavailable gestures; see [CREDITS.md](CREDITS.md) for exact mappings.
 
+Reaching level 50 earns a small **ribbon** on the growth strip and the starter card.
+
 The preview's **Simulate a level** and **Preview evolution** buttons let you try growth immediately. These controls exist only in the browser demo and never change your Hermes save.
 
 ## Browser preview & development
@@ -114,9 +123,9 @@ npm run package
 npm run demo
 ```
 
-Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome, a **Long turn** (the preview clock jumps three minutes into a running turn) and a **Failed turn**, simulated **Web search**, **Terminal** and **Writing files** tool calls, a turn finishing in an **Other chat**, a **Wild visitor**, and **Simulate day 100** to see milestone rewards. Seasons and weather can be pinned from Settings. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
+Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome, a **Long turn** (the preview clock jumps three minutes into a running turn) and a **Failed turn**, simulated **Web search**, **Terminal** and **Writing files** tool calls, a turn finishing in an **Other chat**, a **Wild visitor**, an **Old friend cameo**, **Simulate day 100** to see milestone rewards and the sapling, and **Simulate a week away** for the leaf pile. A simulated status bar, palette and composer show the Hermes-side extras. Seasons and weather can be pinned from Settings. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
 
-`npm run check:browser` runs the seven Playwright scripts in [tests/browser](tests/browser/README.md) against the built demo in headless Chromium (after `npx playwright install chromium`, once); CI runs them on every push. `npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.7.0.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
+`npm run check:browser` runs the eight Playwright scripts in [tests/browser](tests/browser/README.md) against the built demo in headless Chromium (after `npx playwright install chromium`, once); CI runs them on every push. The last one compares three seeded still scenes with the golden images in `tests/goldens` pixel for pixel; `UPDATE_GOLDENS=1 npm run check:browser golden` rewrites them after an intended art change. `npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.7.0.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
 
 ## Hermes awareness & compatibility
 
@@ -125,7 +134,7 @@ Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plu
 - **Long turns**: when Hermes has been working for **3 minutes or more**, your Pokémon stops wandering and sits beside you, keeping the “…” bubble while it waits with you. When that long turn finishes, it gets a bigger reaction: a stretch, two hops and extra sparkle.
 - **Failed turns**: an error or a turn you stop gets a quiet look and a small nod, with no bubble and no confetti. After **two errors in a row**, it brings you the ball, a small invitation to take a break (at most once every 10 minutes; never with reduced motion; your Stop never counts as an error).
 - **What Hermes is doing**: when Hermes starts a web search or browser tool, your Pokémon looks out over the fence; a terminal command gets a curious head tilt; writing or patching files gets a little dig in the grass. Only the tool's name is read, never its arguments or results; other tools get no reaction, and reactions are at least 20 seconds apart because agents call tools in bursts.
-- **Waiting**: a focused `clarify` tool call gets a “?” bubble. Other kinds of pending input may not be detectable.
+- **Waiting**: a focused `clarify` tool call gets a “?” bubble. Tap your Pokémon while the bubble shows and the caret lands in the composer. Other kinds of pending input may not be detectable.
 - **Other chats**: when a turn finishes successfully in a session you are not looking at, your Pokémon glances toward the session list with a small “!”, then goes back to what it was doing. It never cheers for another chat, errors and stops elsewhere are ignored, glances are at least 30 seconds apart, and extra quiet mode shows only the bubble. Useful when sessions are tiled or running in the background.
 - Cues never cancel a fetch, a berry, a pet or a nap (a napping Pokémon just shows the bubble). Keeping company and the break offer wait until play finishes. Missing activity APIs leave the garden fully usable.
 - Animation pauses while hidden. Narrow panes, light/dark themes, reduced motion and clean disable/reload are supported.

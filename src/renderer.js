@@ -120,7 +120,7 @@ const PILE_ART = [
 // The lantern's light, in garden coordinates, for the night-time glow pass.
 export const LANTERN_LIGHT = { x: REWARDS.lantern.x, y: 36, r: 11, color: "#ffb347", strength: 0.8 };
 
-export function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}) {
+export function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}, { random = Math.random } = {}) {
   const c = canvas.getContext("2d");
   const background = drawBackground(),
     foreground = drawForeground();
@@ -133,7 +133,7 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     ground = drawSeasonGround(next);
   }
   setSeason("summer");
-  const ambient = new Ambient();
+  const ambient = new Ambient(random);
   const sp = SPECIES[species];
   let k = 1,
     bubbleLift = 0,

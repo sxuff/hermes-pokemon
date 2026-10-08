@@ -56,6 +56,7 @@ function enable() {
         const button = document.createElement("button");
         button.textContent = contribution.data.label.replace("Hermes Pokémon: ", "");
         button.dataset.command = contribution.data.id;
+        button.setAttribute("aria-label", contribution.data.label);
         button.addEventListener("click", () => { contribution.data.run(); });
         document.querySelector("#palette").append(button);
         const cleanup = () => button.remove();
@@ -206,11 +207,17 @@ document.querySelector("#cameo").addEventListener("click", () => {
     storage.set("companion", { ...record, memories: { ...memories, [other]: { ...memories[other], metAt: Date.now() - 86_400_000 } } });
     enable();
   }
-  const runtime = globalThis.__hermesPokemonDebug?.runtime?.();
-  const ok = runtime?.summonVisitor(`cameo:${other}`);
-  document.querySelector("#event-label").textContent = ok
-    ? `Simulated: ${other[0].toUpperCase() + other.slice(1)}, a starter you raised before, drops by.`
-    : "No cameo right now: someone is already visiting, or extra quiet mode is on.";
+  // A fresh mount needs a moment before it can host a visitor; try for a few seconds.
+  const attempt = (left) => {
+    const runtime = globalThis.__hermesPokemonDebug?.runtime?.();
+    const ok = runtime?.summonVisitor(`cameo:${other}`);
+    if (ok || left <= 0)
+      document.querySelector("#event-label").textContent = ok
+        ? `Simulated: ${other[0].toUpperCase() + other.slice(1)}, a starter you raised before, drops by.`
+        : "No cameo right now: someone is already visiting, or extra quiet mode is on.";
+    else setTimeout(() => attempt(left - 1), 100);
+  };
+  attempt(40);
 });
 function simulateGrowth(evolution) {
   const label = document.querySelector("#growth-label");
