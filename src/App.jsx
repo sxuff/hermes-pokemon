@@ -10,7 +10,7 @@ import { levelFromXp, evolutionLevel, canEvolve, XP_PER_LEVEL, LEVEL_MAX } from 
 import { SEASON_SETTINGS, SEASON_NAMES, resolveSeason } from "./seasons.js";
 import { KEEPSAKES, KEEPSAKE_COUNT, MAX_PLACED } from "./keepsakes.js";
 import { WEATHER_SETTINGS, resolveWeather } from "./weather.js";
-import { daysTogether, milestoneName, rewardsFor, REWARDS } from "./milestones.js";
+import { daysTogether, milestoneName, rewardsFor, REWARDS, saplingStage, saplingLabel, untidyFor } from "./milestones.js";
 import { usualTimes } from "./rhythm.js";
 import { TARGETS, keyboardAction, announce } from "./keyboard.js";
 import { VISITORS } from "./visitors.js";
@@ -67,6 +67,7 @@ function MemoryNote({ memory, onPlace }) {
   const usual = usualTimes(memory.arrivals || []);
   const rewards = rewardsFor(memory.milestones);
   const seen = Object.entries(memory.sightings || {}).sort((a, b) => b[1].count - a[1].count);
+  const days = memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0;
   const clock = (m) => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, Math.floor(m / 60), m % 60));
   return <div className="hp-memories" aria-label="Little things remembered">
     <span className="hp-eyebrow">LITTLE THINGS REMEMBERED</span>
@@ -77,7 +78,7 @@ function MemoryNote({ memory, onPlace }) {
       <div><dt>Usually see you</dt><dd>{usual.length ? usual.map(clock).join(" · ") : "Still learning your rhythm"}</dd></div>
       <div><dt>Days together</dt><dd>{memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0}
         {memory.milestones.length > 0 && <small> · {milestoneName(memory.milestones.at(-1))} celebrated</small>}</dd></div>
-      <div><dt>In the garden</dt><dd>{rewards.length ? rewards.map((id) => REWARDS[id].label).join(" · ") : "A bench on day 30, a lantern on day 100, bunting each anniversary"}</dd></div>
+      <div><dt>In the garden</dt><dd>{[...rewards.map((id) => REWARDS[id].label), saplingLabel(saplingStage(days))].filter(Boolean).join(" · ") || "A sprout after the first week, a bench on day 30, a lantern on day 100, bunting each anniversary"}</dd></div>
       <div><dt>Visitors seen</dt><dd>{seen.length
         ? seen.map(([id, s]) => `${VISITORS[id].name} ×${s.count}`).join(" · ")
         : "None yet. Wild Pokémon stop by now and then"}
@@ -387,6 +388,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     rewards = useRef([]),
     focusTarget = useRef(null),
     cameos = useRef([]),
+    days = useRef(0),
     runtime = useRef(),
     settingsButton = useRef(),
     evolutionPosition = useRef();
@@ -396,6 +398,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   weather.current = record.weather;
   placed.current = store.getMemory(record.species).placed;
   rewards.current = rewardsFor(store.getMemory(record.species).milestones);
+  days.current = store.getMemory(record.species).metAt ? daysTogether(store.getMemory(record.species).metAt, Date.now()) : 0;
   // Starters you have met before may drop by for a cameo, at the form they have reached.
   cameos.current = Object.keys(SPECIES)
     .filter((lineage) => lineage !== record.species && store.getMemory(lineage).metAt > 0)
@@ -408,6 +411,9 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     placed: store.getMemory(record.species).placed,
     season: resolveSeason(record.season, record.hemisphere),
     position: evolutionPosition.current?.species === record.species ? evolutionPosition.current : undefined,
+    // Away a week or more: a few leaves have gathered by the path, until the first interaction.
+    untidy: evolutionPosition.current?.species === record.species ? 0
+      : untidyFor(store.getMemory(record.species).lastSeenAt ? (Date.now() - store.getMemory(record.species).lastSeenAt) / 86_400_000 : 0),
   }), [record.species, form, store]);
   const memory = useRef();
   const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching, evolving: pet.evolving, canEvolve: pet.canEvolve });
@@ -444,6 +450,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       rewards: () => rewards.current,
       focus: () => focusTarget.current,
       cameos: () => cameos.current,
+      days: () => days.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
@@ -466,8 +473,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     return () => { if (debug?.pet === pet) delete debug.pet; };
   }, [pet]);
   // A new sky preference should show immediately, not at the next periodic check.
-  const placedKey = placed.current.join(","), rewardsKey = rewards.current.join(",");
-  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey, rewardsKey]);
+  const placedKey = placed.current.join(","), rewardsKey = rewards.current.join(","), sapling = saplingStage(days.current);
+  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey, rewardsKey, sapling]);
   const closeSettings = () => {
     setSettings(false);
     settingsButton.current?.focus();

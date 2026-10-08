@@ -154,6 +154,21 @@ function simulateReturn() {
   enable();
 }
 document.querySelector("#return").addEventListener("click", simulateReturn);
+// Simulated: you were away for eight days. A few leaves have gathered; your first interaction scatters them.
+document.querySelector("#away").addEventListener("click", () => {
+  const saved = storage.get("companion", null);
+  if (!saved?.species) {
+    document.querySelector("#event-label").textContent = "Choose your companion first, then try a simulated week away.";
+    return;
+  }
+  dispose();
+  const memories = saved.memories || {};
+  storage.set("companion", { ...saved, memories: { ...memories,
+    [saved.species]: { ...memories[saved.species], lastSeenAt: Date.now() - 8 * 86_400_000, lastGreetingAt: Date.now() - 9 * 86_400_000 },
+  } });
+  document.querySelector("#event-label").textContent = "Simulated: you were away for eight days. Pet or call your companion to tidy the leaves.";
+  enable();
+});
 document.querySelector("#visitor").addEventListener("click", () => {
   const runtime = globalThis.__hermesPokemonDebug?.runtime?.();
   const ok = runtime?.summonVisitor();

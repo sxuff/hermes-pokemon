@@ -162,6 +162,12 @@ export class Ambient {
         for (let i = 0; i < 5; i++)
           this.spawn({ kind: "petal", x: x + (r() - 0.5) * 10, y: y + 2, vx: (r() - 0.5) * 12, vy: -12 - r() * 8, color: [P.pink, P.white, P.violet][i % 3], life: 1.4 });
         break;
+      case "tidy":
+        // The gathered leaves blow away in a small flurry.
+        for (let i = 0; i < 4 + (event.size || 1) * 3; i++)
+          this.spawn({ kind: "leaf", x: x + (r() - 0.5) * 8, y: y - 1 - r() * 3, vx: 6 + r() * 10, vy: -8 - r() * 6, sway: r() * 6, life: 1.6 + r() * 0.8, land: 200,
+            color: ["#cf6f30", "#e5993c", "#a4502b"][i % 3], delay: i * 0.05 });
+        break;
       case "butterfly":
         this.butterflies.push({ x: pet.x + 14, y: pet.y - 6, phase: r() * 6, color: [P.yellow, P.pink, P.white][Math.floor(r() * 3)], ttl: 9, orbit: pet });
         this.butterflies = this.butterflies.slice(-4);
@@ -275,6 +281,7 @@ export class Ambient {
       else if (p.kind === "petal" || p.kind === "ember") p.vy += (p.kind === "petal" ? 20 : 2) * dt;
       else if (p.kind === "leaf") {
         if (p.y >= p.land) p.vy = 0;
+        else if (p.land >= 200) p.vy += 14 * dt; // scattered pile leaves arc and fall away
         p.x += Math.sin(p.age * 3 + p.sway) * dt * 8;
       } else if (p.kind === "snow") {
         if (p.y >= p.land) { p.vy = 0; p.vx = 0; }

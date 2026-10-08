@@ -6,7 +6,7 @@ import { Companion, ELSEWHERE_COOLDOWN } from "../src/behavior.js";
 import { toolKind, TOOL_COOLDOWN } from "../src/tools.js";
 import { weatherForDate, resolveWeather, isLateNight, RAIN_CHANCE, showersForDate, SHOWER_MINUTES } from "../src/weather.js";
 import { animMeta } from "../src/anim-meta.generated.js";
-import { daysTogether, dueMilestone, milestoneName, rewardsFor, REWARDS } from "../src/milestones.js";
+import { daysTogether, dueMilestone, milestoneName, rewardsFor, REWARDS, saplingStage, saplingLabel, untidyFor, SAPLING, PILE } from "../src/milestones.js";
 import { Visitors, VISITORS, eligibleVisitors } from "../src/visitors.js";
 import { createPersistence, validateMemory } from "../src/persistence.js";
 import { createCompanionMemory } from "../src/companion-memory.js";
@@ -559,4 +559,38 @@ test("an old friend walks in by the flowers and the companion goes over to say h
   assert.ok(counts.cameo > 60 && counts.cameo < 180, `cameo share ${counts.cameo}/400`);
   v2.current = null;
   assert.equal(v2.summon({ phase: "day", season: "summer", weather: "rain" }), false, "nobody comes in the rain");
+});
+
+// ---- 10. A sapling that grows, and leaves that gather while you are away (v0.7) ---------------
+test("the sapling grows with days together and the pile size follows the days away", () => {
+  assert.equal(saplingStage(0), 0);
+  assert.equal(saplingStage(6), 0);
+  assert.equal(saplingStage(7), 1);
+  assert.equal(saplingStage(14), 2);
+  assert.equal(saplingStage(60), 3);
+  assert.equal(saplingStage(200), 4);
+  assert.equal(saplingStage(365), 5);
+  assert.equal(saplingStage(3000), 5);
+  assert.equal(saplingStage(NaN), 0);
+  assert.equal(saplingLabel(0), null);
+  assert.match(saplingLabel(5), /blossoms/);
+  assert.equal(untidyFor(6.9), 0);
+  assert.equal(untidyFor(7), 1);
+  assert.equal(untidyFor(14), 2);
+  assert.equal(untidyFor(30), 3);
+  assert.equal(untidyFor(NaN), 0);
+  assert.ok(SAPLING.y < 44 && PILE.y > 44 && walkable(PILE), "the sapling stands behind the grass, the pile on it");
+});
+test("gathered leaves scatter on the first interaction and never on autonomous play", () => {
+  const pet = new Companion("bulbasaur", seq(0.99, 0.5), { untidy: 2 });
+  assert.equal(pet.untidy, 2);
+  settle(pet, 20);
+  assert.equal(pet.untidy, 2, "wandering does not tidy");
+  assert.ok(!pet.drain().some((e) => e.type === "tidy"));
+  pet.pet();
+  assert.equal(pet.untidy, 0);
+  const tidy = pet.drain().find((e) => e.type === "tidy");
+  assert.ok(tidy && tidy.size === 2 && tidy.x === PILE.x);
+  assert.deepEqual(new Companion("squirtle", Math.random, { untidy: 9 }).untidy, 0, "only the three sizes");
+  assert.deepEqual(new Companion("squirtle", Math.random).untidy, 0);
 });

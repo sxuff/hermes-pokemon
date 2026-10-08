@@ -44,3 +44,29 @@ export function rewardsFor(milestones) {
   const reached = Array.isArray(milestones) ? milestones.filter((d) => Number.isInteger(d) && d > 0) : [];
   return Object.keys(REWARDS).filter((id) => reached.some((d) => d >= REWARDS[id].days));
 }
+
+// A sapling planted after your first week grows with the days you have spent together: nothing
+// to water, it just gets a little bigger each time you pass a threshold.
+export const SAPLING = { x: 146, y: 43 };
+export const SAPLING_STAGES = [
+  { days: 7, label: "A sprout by the fence" },
+  { days: 14, label: "A young sapling" },
+  { days: 60, label: "A small tree" },
+  { days: 200, label: "A leafy tree" },
+  { days: 365, label: "A tree that blossoms each spring" },
+];
+export function saplingStage(days) {
+  if (!Number.isFinite(days) || days < 0) return 0;
+  let stage = 0;
+  for (const s of SAPLING_STAGES) if (days >= s.days) stage++;
+  return stage;
+}
+export const saplingLabel = (stage) => SAPLING_STAGES[stage - 1]?.label ?? null;
+
+// Away for a week or more, and a few leaves gather by the path. Your first interaction scatters
+// them: a sign of time passed, never a chore. Sizes 1 to 3 for a week, two weeks and a month.
+export const PILE = { x: 60, y: 109 };
+export function untidyFor(daysAway) {
+  if (!Number.isFinite(daysAway) || daysAway < 7) return 0;
+  return daysAway >= 30 ? 3 : daysAway >= 14 ? 2 : 1;
+}

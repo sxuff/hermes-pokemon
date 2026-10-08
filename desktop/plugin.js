@@ -484,6 +484,26 @@ function rewardsFor(milestones) {
   const reached = Array.isArray(milestones) ? milestones.filter((d) => Number.isInteger(d) && d > 0) : [];
   return Object.keys(REWARDS).filter((id) => reached.some((d) => d >= REWARDS[id].days));
 }
+var SAPLING = { x: 146, y: 43 };
+var SAPLING_STAGES = [
+  { days: 7, label: "A sprout by the fence" },
+  { days: 14, label: "A young sapling" },
+  { days: 60, label: "A small tree" },
+  { days: 200, label: "A leafy tree" },
+  { days: 365, label: "A tree that blossoms each spring" }
+];
+function saplingStage(days) {
+  if (!Number.isFinite(days) || days < 0) return 0;
+  let stage = 0;
+  for (const s of SAPLING_STAGES) if (days >= s.days) stage++;
+  return stage;
+}
+var saplingLabel = (stage) => SAPLING_STAGES[stage - 1]?.label ?? null;
+var PILE = { x: 60, y: 109 };
+function untidyFor(daysAway) {
+  if (!Number.isFinite(daysAway) || daysAway < 7) return 0;
+  return daysAway >= 30 ? 3 : daysAway >= 14 ? 2 : 1;
+}
 
 // src/captions.js
 var CAPTIONS = {
@@ -1349,6 +1369,7 @@ var Companion = class {
     this.pendingMilestone = null;
     this.rewards = [];
     this.phase = "day";
+    this.untidy = [1, 2, 3].includes(options.untidy) ? options.untidy : 0;
     this.reset();
     if (this.favoriteSpot) Object.assign(this, SPOTS[this.favoriteSpot]);
     const position = options.position;
@@ -1522,6 +1543,10 @@ var Companion = class {
     this.lastAttention = this.time;
     this.cancelGreeting();
     this.cancelInvitation();
+    if (this.untidy) {
+      this.emit("tidy", { x: PILE.x, y: PILE.y, size: this.untidy });
+      this.untidy = 0;
+    }
   }
   cancelInvitation() {
     if (!this.inviting) return;
@@ -2560,6 +2585,21 @@ var Ambient = class {
         for (let i = 0; i < 5; i++)
           this.spawn({ kind: "petal", x: x + (r() - 0.5) * 10, y: y + 2, vx: (r() - 0.5) * 12, vy: -12 - r() * 8, color: [P.pink, P.white, P.violet][i % 3], life: 1.4 });
         break;
+      case "tidy":
+        for (let i = 0; i < 4 + (event.size || 1) * 3; i++)
+          this.spawn({
+            kind: "leaf",
+            x: x + (r() - 0.5) * 8,
+            y: y - 1 - r() * 3,
+            vx: 6 + r() * 10,
+            vy: -8 - r() * 6,
+            sway: r() * 6,
+            life: 1.6 + r() * 0.8,
+            land: 200,
+            color: ["#cf6f30", "#e5993c", "#a4502b"][i % 3],
+            delay: i * 0.05
+          });
+        break;
       case "butterfly":
         this.butterflies.push({ x: pet.x + 14, y: pet.y - 6, phase: r() * 6, color: [P.yellow, P.pink, P.white][Math.floor(r() * 3)], ttl: 9, orbit: pet });
         this.butterflies = this.butterflies.slice(-4);
@@ -2667,6 +2707,7 @@ var Ambient = class {
       else if (p.kind === "petal" || p.kind === "ember") p.vy += (p.kind === "petal" ? 20 : 2) * dt;
       else if (p.kind === "leaf") {
         if (p.y >= p.land) p.vy = 0;
+        else if (p.land >= 200) p.vy += 14 * dt;
         p.x += Math.sin(p.age * 3 + p.sway) * dt * 8;
       } else if (p.kind === "snow") {
         if (p.y >= p.land) {
@@ -3075,6 +3116,26 @@ var LANTERN = [
   { p: "#6b4b31", L: "#c9473f", g: "#fbe9b0" }
 ];
 var BUNTING_COLORS = [P.pink, P.yellow, P.white, P.violet];
+var SAPLING_ART = [
+  null,
+  [".g.", "gGg", ".s."],
+  ["..g..", ".gGg.", "g.G.g", "..s..", "..s.."],
+  ["..ggg..", ".gGGGg.", "gGGGGGg", ".gGGGg.", "..ggg..", "...t...", "...t...", "...t..."],
+  ["...ggg...", "..gGGGg..", ".gGGGGGg.", "gGGGGGGGg", ".gGGGGGg.", "..gGGGg..", "....t....", "....t....", "....t....", "....t...."],
+  ["...gpg...", "..gGGGg..", ".pGGGGGp.", "gGGGpGGGg", ".gGGGGGg.", "..gpGGg..", "....t....", "....t....", "....t....", "....t...."]
+];
+var SAPLING_COLORS = {
+  summer: { g: "#58a55a", G: "#7cc066", s: "#8b6343", t: "#8b6343", p: "#7cc066" },
+  spring: { g: "#58a55a", G: "#7cc066", s: "#8b6343", t: "#8b6343", p: "#f4a6c0" },
+  autumn: { g: "#cf6f30", G: "#e5993c", s: "#8b6343", t: "#8b6343", p: "#f3c35a" },
+  winter: { g: "#3f6e45", G: "#58a55a", s: "#8b6343", t: "#8b6343", p: "#ffffff" }
+};
+var PILE_ART = [
+  null,
+  [["..oO..", ".oOob.", "boOobb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }],
+  [["...oO...", "..oOOb..", ".oObOob.", "boOobObb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }],
+  [["....oO....", "...oOOb...", "..oObOOb..", ".oOobOoOb.", "boOobOboObb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }]
+];
 var LANTERN_LIGHT = { x: REWARDS.lantern.x, y: 36, r: 11, color: "#ffb347", strength: 0.8 };
 function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}) {
   const c = canvas.getContext("2d");
@@ -3180,6 +3241,27 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
       }
     }
   }
+  function drawSapling(stage, nextSeason) {
+    const rows = SAPLING_ART[stage];
+    if (!rows) return;
+    const colors = SAPLING_COLORS[nextSeason] || SAPLING_COLORS.summer;
+    const x = Math.round(SAPLING.x - rows[0].length / 2), y = SAPLING.y - rows.length + 1;
+    drawOutlined(rows, colors, x, y);
+    if (nextSeason === "winter" && stage >= 3) {
+      c.fillStyle = "#ffffff";
+      rows[0].split("").forEach((ch, ix) => {
+        if (ch !== ".") c.fillRect(x + ix, y, 1, 1);
+      });
+    }
+  }
+  function drawPile(size) {
+    const art = PILE_ART[size];
+    if (!art) return;
+    const [rows, colors] = art;
+    const x = Math.round(PILE.x - rows[0].length / 2), y = PILE.y - rows.length + 1;
+    shadow(PILE.x, PILE.y, Math.round(rows[0].length / 2));
+    drawOutlined(rows, colors, x, y);
+  }
   function drawFocus(index, pet, reduced) {
     const target = TARGETS[index];
     if (!target) return;
@@ -3230,8 +3312,10 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
     ambient.drawBack(c, phase, reduced);
     const rewards = Array.isArray(extras.rewards) ? extras.rewards : [];
     if (rewards.length) drawRewards(rewards, pet.time, reduced);
+    if (extras.sapling) drawSapling(extras.sapling, season);
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
     if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
+    if (pet.untidy) items.push({ y: PILE.y, draw: () => drawPile(pet.untidy) });
     const visitor = extras.visitor;
     if (visitor) items.push({ y: (visitor.def || VISITORS[visitor.species])?.pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
     items.push({ y: pet.swimming ? pet.y - 6 : pet.y, draw: () => drawPet(pet, reduced) });
@@ -3495,9 +3579,9 @@ async function loadVisitorSprites(cameos = []) {
 }
 var FPS = 30;
 var REDUCED_FPS = 8;
-function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], days = () => 0, selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
-  let disposed = false, ready = false, frame = 0, last = 0, pending = 0, inView = false, renderer, draw, lastStatus = "", phase = "day", currentSeason = "summer", currentWeather = "clear", phaseCheck = 0;
+  let disposed = false, ready = false, frame = 0, last = 0, pending = 0, inView = false, renderer, draw, lastStatus = "", phase = "day", currentSeason = "summer", currentWeather = "clear", currentSapling = 0, phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
   const cameoList = pet ? Array.isArray(cameos()) ? cameos() : [] : [];
   const disposers = [];
@@ -3517,6 +3601,7 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
       pet.rewards = Array.isArray(earned) ? earned.filter((id) => typeof id === "string") : [];
       pet.phase = phase;
       visitors?.setCameos(cameoList);
+      currentSapling = saplingStage(days());
     }
   };
   function stop() {
@@ -3639,7 +3724,7 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
     if (pet) {
       renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
       renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
-      draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus() });
+      draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus(), sapling: currentSapling });
     } else {
       const c = canvas.getContext("2d");
       const evolved = FORMS[assetForm]?.stage > 0;
@@ -4131,6 +4216,7 @@ function MemoryNote({ memory, onPlace: onPlace2 }) {
   const usual = usualTimes(memory.arrivals || []);
   const rewards = rewardsFor(memory.milestones);
   const seen = Object.entries(memory.sightings || {}).sort((a, b) => b[1].count - a[1].count);
+  const days = memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0;
   const clock = (m) => new Intl.DateTimeFormat(void 0, { hour: "numeric", minute: "2-digit" }).format(new Date(2e3, 0, 1, Math.floor(m / 60), m % 60));
   return /* @__PURE__ */ jsxs("div", { className: "hp-memories", "aria-label": "Little things remembered", children: [
     /* @__PURE__ */ jsx("span", { className: "hp-eyebrow", children: "LITTLE THINGS REMEMBERED" }),
@@ -4163,7 +4249,7 @@ function MemoryNote({ memory, onPlace: onPlace2 }) {
       ] }),
       /* @__PURE__ */ jsxs("div", { children: [
         /* @__PURE__ */ jsx("dt", { children: "In the garden" }),
-        /* @__PURE__ */ jsx("dd", { children: rewards.length ? rewards.map((id) => REWARDS[id].label).join(" \xB7 ") : "A bench on day 30, a lantern on day 100, bunting each anniversary" })
+        /* @__PURE__ */ jsx("dd", { children: [...rewards.map((id) => REWARDS[id].label), saplingLabel(saplingStage(days))].filter(Boolean).join(" \xB7 ") || "A sprout after the first week, a bench on day 30, a lantern on day 100, bunting each anniversary" })
       ] }),
       /* @__PURE__ */ jsxs("div", { children: [
         /* @__PURE__ */ jsx("dt", { children: "Visitors seen" }),
@@ -4477,13 +4563,14 @@ function Settings({ record, store, onClose, onChange, pet }) {
   );
 }
 function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
-  const canvas = useRef(), motion = useRef(reduced), sky = useRef(record.sky), season = useRef({ setting: record.season, hemisphere: record.hemisphere }), weather = useRef(record.weather), placed = useRef([]), rewards = useRef([]), focusTarget = useRef(null), cameos = useRef([]), runtime = useRef(), settingsButton = useRef(), evolutionPosition = useRef();
+  const canvas = useRef(), motion = useRef(reduced), sky = useRef(record.sky), season = useRef({ setting: record.season, hemisphere: record.hemisphere }), weather = useRef(record.weather), placed = useRef([]), rewards = useRef([]), focusTarget = useRef(null), cameos = useRef([]), days = useRef(0), runtime = useRef(), settingsButton = useRef(), evolutionPosition = useRef();
   motion.current = reduced;
   sky.current = record.sky;
   season.current = { setting: record.season, hemisphere: record.hemisphere };
   weather.current = record.weather;
   placed.current = store.getMemory(record.species).placed;
   rewards.current = rewardsFor(store.getMemory(record.species).milestones);
+  days.current = store.getMemory(record.species).metAt ? daysTogether(store.getMemory(record.species).metAt, Date.now()) : 0;
   cameos.current = Object.keys(SPECIES).filter((lineage) => lineage !== record.species && store.getMemory(lineage).metAt > 0).map((lineage) => ({ lineage, form: formFor(lineage, store.getProgression(lineage).stage), name: SPECIES[lineage].name }));
   const progress = store.getProgression(record.species);
   const form = formFor(record.species, progress.stage);
@@ -4493,7 +4580,9 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     keepsakes: store.getMemory(record.species).keepsakes,
     placed: store.getMemory(record.species).placed,
     season: resolveSeason(record.season, record.hemisphere),
-    position: evolutionPosition.current?.species === record.species ? evolutionPosition.current : void 0
+    position: evolutionPosition.current?.species === record.species ? evolutionPosition.current : void 0,
+    // Away a week or more: a few leaves have gathered by the path, until the first interaction.
+    untidy: evolutionPosition.current?.species === record.species ? 0 : untidyFor(store.getMemory(record.species).lastSeenAt ? (Date.now() - store.getMemory(record.species).lastSeenAt) / 864e5 : 0)
   }), [record.species, form, store]);
   const memory = useRef();
   const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching, evolving: pet.evolving, canEvolve: pet.canEvolve });
@@ -4528,6 +4617,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       rewards: () => rewards.current,
       focus: () => focusTarget.current,
       cameos: () => cameos.current,
+      days: () => days.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
@@ -4556,8 +4646,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       if (debug?.pet === pet) delete debug.pet;
     };
   }, [pet]);
-  const placedKey = placed.current.join(","), rewardsKey = rewards.current.join(",");
-  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey, rewardsKey]);
+  const placedKey = placed.current.join(","), rewardsKey = rewards.current.join(","), sapling = saplingStage(days.current);
+  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey, rewardsKey, sapling]);
   const closeSettings = () => {
     setSettings(false);
     settingsButton.current?.focus();

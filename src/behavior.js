@@ -4,7 +4,7 @@ import { HOME, POND, SPOTS, TREE, directionTo, findPath, inPond, nearestWalkable
 import { isKeepsake, KEEPSAKES, MAX_PLACED } from "./keepsakes.js";
 import { SEASONS } from "./seasons.js";
 import { VISITORS } from "./visitors.js";
-import { milestoneName } from "./milestones.js";
+import { milestoneName, PILE } from "./milestones.js";
 import { CAPTIONS } from "./captions.js";
 import { routines } from "./routines.js";
 import { cues } from "./cues.js";
@@ -52,6 +52,8 @@ export class Companion {
     // What milestones have left in the garden, and the time of day (the lantern is for after dark).
     this.rewards = [];
     this.phase = "day";
+    // Leaves gathered while you were away (0 to 3); your first interaction scatters them.
+    this.untidy = [1, 2, 3].includes(options.untidy) ? options.untidy : 0;
     this.reset();
     if (this.favoriteSpot) Object.assign(this, SPOTS[this.favoriteSpot]);
     const position = options.position;
@@ -231,6 +233,10 @@ export class Companion {
     this.lastAttention = this.time;
     this.cancelGreeting();
     this.cancelInvitation();
+    if (this.untidy) {
+      this.emit("tidy", { x: PILE.x, y: PILE.y, size: this.untidy });
+      this.untidy = 0;
+    }
   }
   cancelInvitation() {
     if (!this.inviting) return;

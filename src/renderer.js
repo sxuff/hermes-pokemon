@@ -6,7 +6,7 @@ import { SPECIES } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
 import { DECOR_SLOTS } from "./keepsakes.js";
 import { VISITORS } from "./visitors.js";
-import { REWARDS } from "./milestones.js";
+import { REWARDS, SAPLING, PILE } from "./milestones.js";
 import { TARGETS } from "./keyboard.js";
 
 const ZZ = ["1111", "0010", "0100", "1111"];
@@ -95,6 +95,28 @@ const LANTERN = [
   { p: "#6b4b31", L: "#c9473f", g: "#fbe9b0" },
 ];
 const BUNTING_COLORS = [P.pink, P.yellow, P.white, P.violet];
+// The sapling, one sprite per stage, anchored at its base. Leaves recolor with the season.
+const SAPLING_ART = [
+  null,
+  [".g.", "gGg", ".s."],
+  ["..g..", ".gGg.", "g.G.g", "..s..", "..s.."],
+  ["..ggg..", ".gGGGg.", "gGGGGGg", ".gGGGg.", "..ggg..", "...t...", "...t...", "...t..."],
+  ["...ggg...", "..gGGGg..", ".gGGGGGg.", "gGGGGGGGg", ".gGGGGGg.", "..gGGGg..", "....t....", "....t....", "....t....", "....t...."],
+  ["...gpg...", "..gGGGg..", ".pGGGGGp.", "gGGGpGGGg", ".gGGGGGg.", "..gpGGg..", "....t....", "....t....", "....t....", "....t...."],
+];
+const SAPLING_COLORS = {
+  summer: { g: "#58a55a", G: "#7cc066", s: "#8b6343", t: "#8b6343", p: "#7cc066" },
+  spring: { g: "#58a55a", G: "#7cc066", s: "#8b6343", t: "#8b6343", p: "#f4a6c0" },
+  autumn: { g: "#cf6f30", G: "#e5993c", s: "#8b6343", t: "#8b6343", p: "#f3c35a" },
+  winter: { g: "#3f6e45", G: "#58a55a", s: "#8b6343", t: "#8b6343", p: "#ffffff" },
+};
+// Leaves gathered while you were away, three sizes.
+const PILE_ART = [
+  null,
+  [["..oO..", ".oOob.", "boOobb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }],
+  [["...oO...", "..oOOb..", ".oObOob.", "boOobObb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }],
+  [["....oO....", "...oOOb...", "..oObOOb..", ".oOobOoOb.", "boOobOboObb"], { o: "#cf6f30", O: "#e5993c", b: "#a4502b" }],
+];
 // The lantern's light, in garden coordinates, for the night-time glow pass.
 export const LANTERN_LIGHT = { x: REWARDS.lantern.x, y: 36, r: 11, color: "#ffb347", strength: 0.8 };
 
@@ -215,6 +237,26 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
       }
     }
   }
+  function drawSapling(stage, nextSeason) {
+    const rows = SAPLING_ART[stage];
+    if (!rows) return;
+    const colors = SAPLING_COLORS[nextSeason] || SAPLING_COLORS.summer;
+    const x = Math.round(SAPLING.x - rows[0].length / 2), y = SAPLING.y - rows.length + 1;
+    drawOutlined(rows, colors, x, y);
+    if (nextSeason === "winter" && stage >= 3) {
+      // A little snow on the crown.
+      c.fillStyle = "#ffffff";
+      rows[0].split("").forEach((ch, ix) => { if (ch !== ".") c.fillRect(x + ix, y, 1, 1); });
+    }
+  }
+  function drawPile(size) {
+    const art = PILE_ART[size];
+    if (!art) return;
+    const [rows, colors] = art;
+    const x = Math.round(PILE.x - rows[0].length / 2), y = PILE.y - rows.length + 1;
+    shadow(PILE.x, PILE.y, Math.round(rows[0].length / 2));
+    drawOutlined(rows, colors, x, y);
+  }
   // Keyboard focus ring: a dashed pixel ellipse around the focused target, marching slowly.
   function drawFocus(index, pet, reduced) {
     const target = TARGETS[index];
@@ -268,9 +310,11 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     ambient.drawBack(c, phase, reduced);
     const rewards = Array.isArray(extras.rewards) ? extras.rewards : [];
     if (rewards.length) drawRewards(rewards, pet.time, reduced);
+    if (extras.sapling) drawSapling(extras.sapling, season);
     // Depth-sort everything that stands on the ground.
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
     if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
+    if (pet.untidy) items.push({ y: PILE.y, draw: () => drawPile(pet.untidy) });
     const visitor = extras.visitor;
     if (visitor) items.push({ y: (visitor.def || VISITORS[visitor.species])?.pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
     items.push({ y: pet.swimming ? pet.y - 6 : pet.y, draw: () => drawPet(pet, reduced) });

@@ -105,3 +105,25 @@ test("milestone rewards stand against the fence and the lantern glows only after
     assert.ok([...f.pixels].some(([, color]) => color === "#f4f1d8"), "and the moon is up");
   } finally { f.restore(); }
 });
+
+test("the sapling grows by stage behind the fence and the leaf pile sits on the grass until tidied", () => {
+  const f = paintingFixture("squirtle", "squirtle");
+  try {
+    const pet = new Companion("squirtle", Math.random, { untidy: 3 });
+    f.renderer.resize(370, 1);
+    f.renderer.draw(pet, "day", false, "summer", { sapling: 0 });
+    assert.equal([...f.pixels].filter(([, color]) => color === "#7cc066" || color === "#e5993c").length > 0, true, "garden art may use these colors elsewhere");
+    const count = (pred) => [...f.pixels].filter(([key, color]) => pred(key.split(",").map(Number), color)).length;
+    const pileBefore = count(([x, y], color) => color === "#e5993c" && y > 100 && x > 50 && x < 72);
+    assert.ok(pileBefore > 0, "the pile is drawn");
+    f.pixels.clear();
+    f.renderer.draw(pet, "day", false, "autumn", { sapling: 5 });
+    const crown = count(([x, y], color) => color === "#e5993c" && y < 44 && x > 138);
+    assert.ok(crown > 10, "an autumn crown by the fence");
+    pet.pet();
+    f.pixels.clear();
+    f.renderer.draw(pet, "day", false, "summer", { sapling: 1 });
+    assert.equal(count(([x, y], color) => color === "#e5993c" && y > 100 && x > 50 && x < 72), 0, "tidied away");
+    assert.ok(count(([x, y], color) => color === "#7cc066" && y < 44 && x > 142) > 0, "a sprout is drawn");
+  } finally { f.restore(); }
+});

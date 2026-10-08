@@ -6,6 +6,7 @@ import { resolveSeason } from "./seasons.js";
 import { LONG_TURN_MS } from "./hermes.js";
 import { resolveWeather, isLateNight } from "./weather.js";
 import { Visitors, VISITORS } from "./visitors.js";
+import { saplingStage } from "./milestones.js";
 
 async function loadVisitorSprites(cameos = []) {
   // Wild visitors by species, cameos by the form your other starter has reached.
@@ -18,7 +19,7 @@ const FPS = 30,
   REDUCED_FPS = 8;
 
 // Each mounted canvas owns one scheduler. Visibility changes cancel the pending frame.
-export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], days = () => 0, selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
   let disposed = false,
     ready = false,
@@ -32,6 +33,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     phase = "day",
     currentSeason = "summer",
     currentWeather = "clear",
+    currentSapling = 0,
     phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
   // Starters you have raised before, fixed at mount so their sheets are loaded once.
@@ -54,6 +56,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
       pet.rewards = Array.isArray(earned) ? earned.filter((id) => typeof id === "string") : [];
       pet.phase = phase;
       visitors?.setCameos(cameoList);
+      currentSapling = saplingStage(days());
     }
   };
   function stop() {
@@ -174,7 +177,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
       if (pet) {
         renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
         renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
-        draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus() });
+        draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus(), sapling: currentSapling });
       } else {
         // Starter-card preview: idle with an occasional nod, a happy hop when chosen.
         const c = canvas.getContext("2d");
