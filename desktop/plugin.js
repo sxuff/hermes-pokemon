@@ -1,4 +1,4 @@
-// Hermes Pokémon v0.6.2 — bundled sprites: CHUNSOFT and SpriteCollab contributors. See CREDITS.md.
+// Hermes Pokémon v0.7.0 — bundled sprites: CHUNSOFT and SpriteCollab contributors. See CREDITS.md.
 
 // src/plugin.jsx
 import * as sdk from "@hermes/plugin-sdk";
@@ -452,6 +452,15 @@ function milestoneName(days) {
   if (days >= 365 && days % 365 === 0) return days === 365 ? "One year together" : `${days / 365} years together`;
   return `${days} days together`;
 }
+var REWARDS = {
+  bench: { label: "A garden bench", days: 30, x: 104, y: 43 },
+  lantern: { label: "A paper lantern", days: 100, x: 65, y: 43 },
+  bunting: { label: "Anniversary bunting", days: 365 }
+};
+function rewardsFor(milestones) {
+  const reached = Array.isArray(milestones) ? milestones.filter((d) => Number.isInteger(d) && d > 0) : [];
+  return Object.keys(REWARDS).filter((id) => reached.some((d) => d >= REWARDS[id].days));
+}
 
 // src/behavior.js
 var TICKS = 60;
@@ -459,6 +468,7 @@ var ACCEL = 80;
 var COMPANY_SPOT = { x: HOME.x + 12, y: HOME.y - 6 };
 var BREAK_STREAK = 2;
 var BREAK_COOLDOWN = 600;
+var ELSEWHERE_COOLDOWN = 30;
 var onPlace = (p) => !p ? null : onTree(p) ? "tree" : inPond(p) ? "pond" : Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10 ? "flowers" : null;
 var CAPTIONS = {
   idle: "Taking it all in",
@@ -510,7 +520,10 @@ var CAPTIONS = {
   dozing: "Dozing off beside you. It's late",
   visitor: "Watching a wild visitor",
   admiring: "Checking on a keepsake",
-  milestone: "Another milestone together"
+  milestone: "Another milestone together",
+  elsewhere: "Something finished in another chat",
+  bench: "Resting by the bench you earned together",
+  lanternlit: "Sitting in the lantern light"
 };
 var FETCH = /* @__PURE__ */ new Set(["chasing", "returning", "presenting"]);
 var Companion = class {
@@ -539,7 +552,10 @@ var Companion = class {
     this.lateNight = false;
     this.placed = Array.isArray(options.placed) ? options.placed.filter((id) => this.keepsakes.has(id)).slice(0, MAX_PLACED) : [];
     this.nextToolAt = 0;
+    this.nextElsewhereAt = 0;
     this.pendingMilestone = null;
+    this.rewards = [];
+    this.phase = "day";
     this.reset();
     if (this.favoriteSpot) Object.assign(this, SPOTS[this.favoriteSpot]);
     const position = options.position;
@@ -684,11 +700,15 @@ var Companion = class {
       return this.start(this.invitationPlan());
     }
     let plan;
-    if (!this.reduced && (this.weather === "rain" || this.lateNight || this.placed.length)) {
+    if (!this.reduced && (this.weather === "rain" || this.lateNight || this.placed.length || this.rewards.length)) {
       const q = this.random();
       if (this.weather === "rain" && q < 0.35) plan = this.rainPlan();
       else if (this.lateNight && q < 0.6) plan = q < 0.3 ? this.sleepyPlan() : this.napPlan(true);
       else if (this.placed.length && q > 0.88) plan = this.decorPlan();
+      else if (this.rewards.length && q > 0.76 && q <= 0.88) {
+        const visit = this.rewardPlan();
+        if (visit.length) plan = visit;
+      }
     }
     const r = this.random();
     if (plan) {
@@ -939,6 +959,26 @@ var Companion = class {
       { kind: "turn", dir: 0 }
     ];
   }
+  // Spend a moment with something a milestone left behind: the bench by day, the lantern once
+  // it is lit. Bunting is only for looking at.
+  rewardPlan() {
+    const lantern = this.rewards.includes("lantern") && ["dusk", "night"].includes(this.phase);
+    const bench = this.rewards.includes("bench");
+    const id = lantern && (!bench || this.random() < 0.6) ? "lantern" : bench ? "bench" : null;
+    if (!id) return [];
+    const spot = REWARDS[id];
+    const to = nearestWalkable({ x: spot.x, y: spot.y + 5 });
+    const state = id === "lantern" ? "lanternlit" : "bench";
+    return [
+      { kind: "walk", to, state: "walking" },
+      { kind: "turn", dir: id === "lantern" ? 4 : 0, state },
+      ...id === "lantern" ? [{ kind: "pose", anim: "LookUp", duration: 2.2, state }, { kind: "turn", dir: 0, state }] : [],
+      { kind: "pose", anim: "Sit", duration: 5 + this.random() * 4, state },
+      { kind: "pose", anim: "Nod", once: true, rate: 0.7, state },
+      { kind: "pose", anim: "Sit", duration: 2 + this.random() * 2, state },
+      { kind: "turn", dir: 0 }
+    ];
+  }
   napPlan(travel) {
     const spot = SPOTS[this.favoriteSpot || SPECIES[this.species].napSpot];
     return [
@@ -1078,7 +1118,10 @@ var Companion = class {
       "soaking",
       "sleepy",
       "puddling",
-      "sheltering"
+      "sheltering",
+      "elsewhere",
+      "bench",
+      "lanternlit"
     ].includes(this.state) && !this.inviting)
       this.keepCompany();
     return true;
@@ -1147,6 +1190,29 @@ var Companion = class {
     }
     plan.push({ kind: "turn", dir: 0, state }, { kind: "pose", anim: "Idle", duration: 0.8, state: stay ? "company" : "idle" });
     this.start(plan);
+    return true;
+  }
+  // A turn finished in a chat you are not looking at: a glance toward the session list and a
+  // small "!" so a tiled or background session's finish is noticeable without a notification.
+  noticeElsewhere() {
+    if (this.time < this.nextElsewhereAt) return false;
+    if (this.busy || this.swimming || this.asleep || this.inviting || this.greetingActive || this.pendingGreeting || ["petting", "waking", "eating", "investigating", "dozing", "treasure", "milestone", "offering", "proud", "celebrating", "steady", "stopped", "elsewhere"].includes(this.state))
+      return false;
+    this.nextElsewhereAt = this.time + ELSEWHERE_COOLDOWN;
+    this.say("!", 1.4);
+    const stay = this.companyActive;
+    const state = "elsewhere", after = { kind: "pose", anim: "Idle", duration: 0.6, state: stay ? "company" : "idle" };
+    if (this.reduced) {
+      this.start([{ kind: "pose", anim: "Idle", duration: 1.6, state }, after]);
+      return true;
+    }
+    this.start([
+      { kind: "turn", dir: 6, fast: true, state },
+      { kind: "pose", anim: "Idle", duration: 1.6, state },
+      { kind: "pose", anim: "Nod", once: true, rate: 0.9, state },
+      { kind: "turn", dir: 0, state },
+      after
+    ]);
     return true;
   }
   // A wild Pokémon stopped by: turn and watch it for a moment.
@@ -2232,12 +2298,29 @@ function drawForeground() {
 // src/ambient.js
 var inPondPoint = (x, y) => ((x - POND.x) / (POND.rx - 3)) ** 2 + ((y - POND.y) / (POND.ry - 2)) ** 2 <= 1;
 var GLINTS = [[-14, -3, 3, 1.7], [-6, 3, 2, 2.3], [3, -5, 3, 1.4], [10, 2, 2, 2], [-1, 6, 2, 1.1], [14, -1, 2, 2.6]];
-function phaseForHour(hour) {
-  if (hour >= 5 && hour < 8) return "dawn";
-  if (hour >= 8 && hour < 18) return "day";
-  if (hour >= 18 && hour < 20.5) return "dusk";
+var DAYLIGHT = {
+  spring: { dawn: [5.5, 8], dusk: [18, 20.5] },
+  summer: { dawn: [4.5, 7], dusk: [19.5, 22] },
+  autumn: { dawn: [6, 8.5], dusk: [17.5, 20] },
+  winter: { dawn: [7, 9], dusk: [16.5, 18.5] }
+};
+var DEFAULT_DAYLIGHT = { dawn: [5, 8], dusk: [18, 20.5] };
+function phaseForHour(hour, season) {
+  const { dawn, dusk } = DAYLIGHT[season] || DEFAULT_DAYLIGHT;
+  if (hour >= dawn[0] && hour < dawn[1]) return "dawn";
+  if (hour >= dawn[1] && hour < dusk[0]) return "day";
+  if (hour >= dusk[0] && hour < dusk[1]) return "dusk";
   return "night";
 }
+var NEW_MOON = Date.UTC(2e3, 0, 6, 18, 14);
+var SYNODIC_DAYS = 29.530588853;
+function moonPhase(date = /* @__PURE__ */ new Date()) {
+  const t = date instanceof Date ? date.getTime() : NaN;
+  if (!Number.isFinite(t)) return 0.5;
+  const days = (t - NEW_MOON) / 864e5;
+  return (days / SYNODIC_DAYS % 1 + 1) % 1;
+}
+var moonIllumination = (phase) => (1 - Math.cos(phase * 2 * Math.PI)) / 2;
 var GRADES = {
   dawn: { tint: "#ffd9d2", sky: "#ffc7b8", glow: 0.25 },
   day: { tint: null, sky: null, glow: 0 },
@@ -2284,6 +2367,7 @@ var Ambient = class {
     this.floaters = [];
     this.season = "summer";
     this.weather = "clear";
+    this.moon = { phase: 0.5, flip: false };
     this.rainLevel = 0;
     this.drops = Array.from({ length: 34 }, () => ({ x: random() * 176, y: random() * 124, speed: 65 + random() * 35 }));
     this.nextRipple = 1;
@@ -2673,7 +2757,7 @@ var Ambient = class {
     c.globalAlpha = 1;
   }
   // Lights are added after the scene grade so they glow in the dark.
-  drawLights(c, phase, glowSource, reduced) {
+  drawLights(c, phase, glowSource, reduced, lights = []) {
     const grade = GRADES[phase];
     const { dot, rect } = pen(c);
     const t = reduced ? 0 : this.time;
@@ -2683,19 +2767,32 @@ var Ambient = class {
         if (x < 56 || x > 126 && x < 140 && y < 13) continue;
         if (Math.sin(t * 1.5 + i * 2.3) > -0.6) dot(x, y, i % 4 ? "#c9d4ff" : "#ffffff");
       }
-      rect(130, 4, 7, 7, "#f4f1d8");
-      rect(131, 3, 5, 9, "#f4f1d8");
-      rect(132, 5, 2, 2, "#dcd8bd");
-      rect(134, 8, 1, 1, "#dcd8bd");
-      const widths = [4, 3, 5, 2, 3, 1];
-      widths.forEach((w, i) => {
-        const y = POND.y - 6 + i * 2;
-        const x = Math.round(129 - w / 2 + (reduced ? 0 : Math.sin(t * 1.3 + i * 1.7) * 0.8));
-        if (!inPondPoint(x, y) || !inPondPoint(x + w - 1, y)) return;
-        c.globalAlpha = 0.5 - i * 0.06;
-        rect(x, y, w, 1, "#f4f1d8");
-      });
-      c.globalAlpha = 1;
+      const { phase: moon, flip } = this.moon;
+      const lit = moonIllumination(moon);
+      const edge = Math.cos(moon * 2 * Math.PI);
+      for (let y = 3; y <= 11; y++) {
+        const half = y === 3 || y === 11 ? 2 : 3, w = half + 0.5;
+        for (let x = 133 - half; x <= 133 + half; x++) {
+          const px = (x - 133) * (flip ? -1 : 1);
+          const bright = moon < 0.5 ? px > w * edge : px < -w * edge;
+          dot(x, y, bright ? "#f4f1d8" : "#3a4578");
+        }
+      }
+      if (lit > 0.3) {
+        rect(132, 5, 2, 2, "#dcd8bd");
+        rect(134, 8, 1, 1, "#dcd8bd");
+      }
+      if (lit > 0.08) {
+        const widths = [4, 3, 5, 2, 3, 1];
+        widths.forEach((w, i) => {
+          const y = POND.y - 6 + i * 2;
+          const x = Math.round(129 - w / 2 + (reduced ? 0 : Math.sin(t * 1.3 + i * 1.7) * 0.8));
+          if (!inPondPoint(x, y) || !inPondPoint(x + w - 1, y)) return;
+          c.globalAlpha = (0.5 - i * 0.06) * (0.35 + 0.65 * lit);
+          rect(x, y, w, 1, "#f4f1d8");
+        });
+        c.globalAlpha = 1;
+      }
     }
     if (!grade.glow) return;
     c.globalCompositeOperation = "lighter";
@@ -2707,6 +2804,12 @@ var Ambient = class {
       c.globalAlpha = 1;
     };
     if (glowSource) glow(glowSource.x, glowSource.y, 16, "#ff9a3c", grade.glow * (0.85 + Math.sin(t * 9) * 0.08));
+    for (const light of lights) {
+      glow(light.x, light.y, light.r || 10, light.color || "#ffb347", grade.glow * (light.strength ?? 0.8) * (0.9 + Math.sin(t * 5 + light.x) * 0.06));
+      c.globalAlpha = 0.85 * grade.glow;
+      rect(light.x - 1, light.y - 2, 3, 4, "#fff1a6");
+      c.globalAlpha = 1;
+    }
     const fireflies = this.weather === "rain" ? 0 : this.season === "summer" ? this.fireflies.length : this.season === "winter" ? 0 : 3;
     if (phase === "night" || phase === "dusk")
       for (const f of this.fireflies.slice(0, fireflies)) {
@@ -2749,6 +2852,32 @@ function drawBubble(c, bubble, x, y, time, reduced) {
     for (let i = 0; i < 3; i++) dot(ix + i * 2, iy + (!reduced && Math.floor(age * 6) % 3 === i ? -1 : 0), color);
   } else bitmap(c, icon, ix, iy, color);
   c.globalAlpha = 1;
+}
+
+// src/keyboard.js
+var TARGETS = [
+  { id: "companion", label: "your companion", hint: "pet it", rx: 11, ry: 13 },
+  { id: "tree", label: "the old tree", hint: "explore it together", point: { x: TREE.x, y: TREE.canopyY + 4 }, rx: 24, ry: 22 },
+  { id: "pond", label: "the pond", hint: "explore it together", point: { x: POND.x, y: POND.y }, rx: POND.rx + 2, ry: POND.ry + 2 },
+  { id: "flowers", label: "the flower bed", hint: "explore it together", point: { ...SPOTS.flowers }, rx: 11, ry: 7 },
+  { id: "meadow", label: "the quiet meadow", hint: "call it over", point: { ...SPOTS.meadow }, rx: 12, ry: 7 }
+];
+var NEXT = /* @__PURE__ */ new Set(["ArrowRight", "ArrowDown"]);
+var PREVIOUS = /* @__PURE__ */ new Set(["ArrowLeft", "ArrowUp"]);
+var hasFocus = (index) => Number.isInteger(index) && index >= 0 && index < TARGETS.length;
+function keyboardAction(key, current) {
+  const has = hasFocus(current);
+  if (NEXT.has(key)) return { type: "move", index: has ? (current + 1) % TARGETS.length : 0 };
+  if (PREVIOUS.has(key)) return { type: "move", index: has ? (current + TARGETS.length - 1) % TARGETS.length : TARGETS.length - 1 };
+  if (key === "Home") return { type: "move", index: 0 };
+  if (key === "End") return { type: "move", index: TARGETS.length - 1 };
+  if (key === "Enter" || key === " ") return has ? { type: "activate", index: current } : { type: "move", index: 0 };
+  if (key === "Escape") return has ? { type: "clear" } : null;
+  return null;
+}
+function announce(index) {
+  const target = TARGETS[index];
+  return target ? `${target.label[0].toUpperCase()}${target.label.slice(1)}. Press Enter to ${target.hint}.` : "";
 }
 
 // src/renderer.js
@@ -2819,6 +2948,16 @@ var DECOR = {
   seed: [[".d", "dl"], { d: "#4a3b2c", l: "#d8c9a0" }],
   snowdrop: [[".w.", "www", ".g."], { w: "#ffffff", g: "#4f9a52" }]
 };
+var BENCH = [
+  ["wwwwwwwwwwww", "w.ww.ww.ww.w", "wwwwwwwwwwww", "ssssssssssss", "dddddddddddd", "ll........ll", "ll........ll"],
+  { w: "#c79a68", s: "#e2bd8a", d: "#9b7149", l: "#6b4b31" }
+];
+var LANTERN = [
+  ["ppppppp.", "pp..LLL.", "pp..LgL.", "pp..LgL.", "pp..LgL.", "pp..LLL.", "pp......", "pp......", "pp......", "pp......", "pp......"],
+  { p: "#6b4b31", L: "#c9473f", g: "#fbe9b0" }
+];
+var BUNTING_COLORS = [P.pink, P.yellow, P.white, P.violet];
+var LANTERN_LIGHT = { x: REWARDS.lantern.x, y: 36, r: 11, color: "#ffb347", strength: 0.8 };
 function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}) {
   const c = canvas.getContext("2d");
   const background = drawBackground(), foreground = drawForeground();
@@ -2895,6 +3034,49 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
       drawPixels(c, rows, x, y, colors);
     });
   }
+  function drawOutlined(rows, colors, x, y) {
+    c.fillStyle = "#2c3a33";
+    rows.forEach((row, iy) => [...row].forEach((ch, ix) => {
+      if (colors[ch]) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) c.fillRect(x + ix + dx, y + iy + dy, 1, 1);
+    }));
+    drawPixels(c, rows, x, y, colors);
+  }
+  function drawRewards(rewards, time, reduced) {
+    if (rewards.includes("bench")) {
+      const [rows, colors] = BENCH, { x, y } = REWARDS.bench;
+      drawOutlined(rows, colors, Math.round(x - rows[0].length / 2), y - rows.length + 1);
+    }
+    if (rewards.includes("lantern")) {
+      const [rows, colors] = LANTERN, { x, y } = REWARDS.lantern;
+      drawOutlined(rows, colors, x - 5, y - rows.length + 1);
+    }
+    if (rewards.includes("bunting")) {
+      for (let i = 0; i < 14; i++) {
+        const x = 68 + i * 6, color = BUNTING_COLORS[i % BUNTING_COLORS.length];
+        const flutter = !reduced && Math.sin(time * 3 + i * 1.3) > 0.3 ? 1 : 0;
+        c.fillStyle = "#2c3a33";
+        c.fillRect(x - 1, 27, 5, 1);
+        c.fillStyle = color;
+        c.fillRect(x, 27, 3, 1);
+        c.fillRect(x + 1 + flutter, 28, 1, 1);
+      }
+    }
+  }
+  function drawFocus(index, pet, reduced) {
+    const target = TARGETS[index];
+    if (!target) return;
+    const cx = target.point ? target.point.x : pet.x, cy = target.point ? target.point.y : pet.y - 9;
+    const offset = reduced ? 0 : Math.floor(pet.time * 4) % 2;
+    for (let a = 0; a < 48; a++) {
+      if ((a + offset) % 2) continue;
+      const ang = a / 48 * Math.PI * 2;
+      const x = Math.round(cx + Math.cos(ang) * target.rx), y = Math.round(cy + Math.sin(ang) * target.ry);
+      c.fillStyle = "#2c3a33";
+      c.fillRect(x - 1, y - 1, 3, 3);
+      c.fillStyle = "#fffdf3";
+      c.fillRect(x, y, 1, 1);
+    }
+  }
   function drawVisitor(v, reduced) {
     const sheets = visitorSprites[v.species];
     if (!sheets) return;
@@ -2928,6 +3110,8 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
     c.drawImage(background, 0, 0);
     c.drawImage(ground, 0, 0);
     ambient.drawBack(c, phase, reduced);
+    const rewards = Array.isArray(extras.rewards) ? extras.rewards : [];
+    if (rewards.length) drawRewards(rewards, pet.time, reduced);
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
     if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
     const visitor = extras.visitor;
@@ -2955,7 +3139,8 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
       c.globalCompositeOperation = "source-over";
     }
     const flame = sp.glow && !pet.swimming ? { x: pet.x + [-5, -6, -7, -3, 5, 6, 7, 3][pet.dir], y: pet.y - 10 } : null;
-    ambient.drawLights(c, phase, flame, reduced);
+    ambient.drawLights(c, phase, flame, reduced, rewards.includes("lantern") ? [LANTERN_LIGHT] : []);
+    if (extras.focus !== null && extras.focus !== void 0) drawFocus(extras.focus, pet, reduced);
     const bodyHeight = animMeta[pet.form || form].visualHeight || 22;
     if (pet.bubble) drawBubble(c, pet.bubble, pet.x, pet.y - Math.max(pet.swimming ? 20 : 26, bodyHeight + 4) - bubbleLift, pet.time, reduced);
     if ((pet.drowsy ?? pet.asleep) && !reduced) {
@@ -2989,6 +3174,10 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
     },
     tick(dt, phase, reduced, nextSeason = season, weather = "clear") {
       ambient.tick(dt, phase, reduced, nextSeason, weather);
+    },
+    // Tonight's moon phase (0 new, 0.5 full) and whether the lit side is mirrored.
+    setMoon(phase, flip = false) {
+      if (Number.isFinite(phase)) ambient.moon = { phase: (phase % 1 + 1) % 1, flip: Boolean(flip) };
     },
     get season() {
       return season;
@@ -3025,6 +3214,7 @@ var LONG_TURN_MS = 18e4;
 function createHermesBridge(host2, ctx, { now = Date.now } = {}) {
   const activity = signal({ kind: "idle", sequence: 0 });
   const tool = signal({ kind: null, sequence: 0 });
+  const elsewhere = signal({ session: null, sequence: 0 });
   const visible = signal(true);
   const disposers = [];
   let disposed = false, focused = null, busy = false, waitingTool = null, since = null, errors = 0;
@@ -3080,7 +3270,13 @@ function createHermesBridge(host2, ctx, { now = Date.now } = {}) {
   }
   function event(e) {
     const id = read(focusAtom);
-    if (!id || e.replayed || e.session_id !== id) return;
+    if (e.replayed) return;
+    if (e.session_id !== id) {
+      if (e.type === "message.complete" && typeof e.session_id === "string" && e.payload?.status === "complete" && !e.payload?.error && !disposed)
+        elsewhere.set({ session: e.session_id, sequence: elsewhere.get().sequence + 1 });
+      return;
+    }
+    if (!id) return;
     const profile = read(state.focusedSessionProfile);
     if (e.profile && profile && e.profile !== profile) return;
     if (e.type === "message.complete") complete(e.payload);
@@ -3112,10 +3308,11 @@ function createHermesBridge(host2, ctx, { now = Date.now } = {}) {
     disposers.splice(0).forEach((fn) => fn?.());
     activity.clear();
     tool.clear();
+    elsewhere.clear();
     visible.clear();
   };
   ctx.onDispose(dispose);
-  return { activity, tool, visible, dispose, now };
+  return { activity, tool, elsewhere, visible, dispose, now };
 }
 
 // src/weather.js
@@ -3163,16 +3360,16 @@ async function loadVisitorSprites() {
 }
 var FPS = 30;
 var REDUCED_FPS = 8;
-function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
   let disposed = false, ready = false, frame = 0, last = 0, pending = 0, inView = false, renderer, draw, lastStatus = "", phase = "day", currentSeason = "summer", currentWeather = "clear", phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
   const disposers = [];
   const updatePhase = () => {
-    const setting = sky();
-    phase = setting === "auto" ? phaseForHour((/* @__PURE__ */ new Date()).getHours() + (/* @__PURE__ */ new Date()).getMinutes() / 60) : setting;
-    const s = season();
+    const setting = sky(), s = season(), date = /* @__PURE__ */ new Date();
     currentSeason = resolveSeason(s?.setting, s?.hemisphere);
+    phase = setting === "auto" ? phaseForHour(date.getHours() + date.getMinutes() / 60, currentSeason) : setting;
+    renderer?.setMoon(moonPhase(date), s?.hemisphere === "south");
     currentWeather = resolveWeather(weather(), currentSeason);
     if (pet) {
       pet.season = currentSeason;
@@ -3180,6 +3377,9 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
       pet.lateNight = isLateNight(/* @__PURE__ */ new Date());
       const ids = placed();
       pet.placed = Array.isArray(ids) ? ids.filter((id) => pet.keepsakes.has(id)) : [];
+      const earned = rewards();
+      pet.rewards = Array.isArray(earned) ? earned.filter((id) => typeof id === "string") : [];
+      pet.phase = phase;
     }
   };
   function stop() {
@@ -3285,6 +3485,10 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
     disposers.push(bridge.tool.subscribe(() => {
       if (active()) pet.reactToTool(bridge.tool.get().kind);
     }));
+  if (pet && bridge.elsewhere?.subscribe)
+    disposers.push(bridge.elsewhere.subscribe(() => {
+      if (active()) pet.noticeElsewhere?.();
+    }));
   if (pet)
     disposers.push(
       bridge.activity.subscribe(() => {
@@ -3298,7 +3502,7 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
     if (pet) {
       renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
       renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
-      draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, visitor: visitors?.current });
+      draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus() });
     } else {
       const c = canvas.getContext("2d");
       const evolved = FORMS[assetForm]?.stage > 0;
@@ -3367,6 +3571,10 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
     summonVisitor: (id) => visitors?.summon({ phase, season: currentSeason, weather: currentWeather }, id) ?? false,
     get visitor() {
       return visitors?.current ?? null;
+    },
+    // Preview/testing only: tonight's moon as the renderer has it.
+    get moon() {
+      return renderer?.ambient.moon ?? null;
     }
   };
 }
@@ -3764,6 +3972,7 @@ var MOMENT_NAMES = { pet: "A little affection", ball: "A game of fetch", berry: 
 function MemoryNote({ memory, onPlace: onPlace2 }) {
   const moment = memory.lastInteraction;
   const usual = usualTimes(memory.arrivals || []);
+  const rewards = rewardsFor(memory.milestones);
   const clock = (m) => new Intl.DateTimeFormat(void 0, { hour: "numeric", minute: "2-digit" }).format(new Date(2e3, 0, 1, Math.floor(m / 60), m % 60));
   return /* @__PURE__ */ jsxs("div", { className: "hp-memories", "aria-label": "Little things remembered", children: [
     /* @__PURE__ */ jsx("span", { className: "hp-eyebrow", children: "LITTLE THINGS REMEMBERED" }),
@@ -3793,6 +4002,10 @@ function MemoryNote({ memory, onPlace: onPlace2 }) {
             " celebrated"
           ] })
         ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("dt", { children: "In the garden" }),
+        /* @__PURE__ */ jsx("dd", { children: rewards.length ? rewards.map((id) => REWARDS[id].label).join(" \xB7 ") : "A bench on day 30, a lantern on day 100, bunting each anniversary" })
       ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "hp-keepsakes", "aria-label": "Keepsakes found together", children: [
@@ -4025,7 +4238,7 @@ function Settings({ record, store, onClose, onChange, pet }) {
         /* @__PURE__ */ jsxs("div", { className: "hp-sky", children: [
           /* @__PURE__ */ jsx("span", { className: "hp-label", children: "Garden light" }),
           /* @__PURE__ */ jsx("div", { className: "hp-segmented", role: "radiogroup", "aria-label": "Garden light", children: SKIES.map((sky) => /* @__PURE__ */ jsx("button", { type: "button", role: "radio", "aria-checked": record.sky === sky, onClick: () => store.update({ sky }), children: sky === "auto" ? "Clock" : sky[0].toUpperCase() + sky.slice(1) }, sky)) }),
-          /* @__PURE__ */ jsx("small", { children: "Clock follows your local time \u2014 dawn, day, dusk and a starry night." })
+          /* @__PURE__ */ jsx("small", { children: "Clock follows your local time \u2014 dawn, day, dusk and a starry night. Days run long in summer and short in winter, and the moon keeps its real phase." })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "hp-sky hp-season", children: [
           /* @__PURE__ */ jsx("span", { className: "hp-label", children: "Garden season" }),
@@ -4089,19 +4302,20 @@ function Settings({ record, store, onClose, onChange, pet }) {
           "Pok\xE9mon \xA9 Nintendo / Creatures / GAME FREAK.",
           /* @__PURE__ */ jsx("br", {}),
           "Independent fan project \xB7 v",
-          "0.6.2"
+          "0.7.0"
         ] })
       ]
     }
   );
 }
 function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
-  const canvas = useRef(), motion = useRef(reduced), sky = useRef(record.sky), season = useRef({ setting: record.season, hemisphere: record.hemisphere }), weather = useRef(record.weather), placed = useRef([]), runtime = useRef(), settingsButton = useRef(), evolutionPosition = useRef();
+  const canvas = useRef(), motion = useRef(reduced), sky = useRef(record.sky), season = useRef({ setting: record.season, hemisphere: record.hemisphere }), weather = useRef(record.weather), placed = useRef([]), rewards = useRef([]), focusTarget = useRef(null), runtime = useRef(), settingsButton = useRef(), evolutionPosition = useRef();
   motion.current = reduced;
   sky.current = record.sky;
   season.current = { setting: record.season, hemisphere: record.hemisphere };
   weather.current = record.weather;
   placed.current = store.getMemory(record.species).placed;
+  rewards.current = rewardsFor(store.getMemory(record.species).milestones);
   const progress = store.getProgression(record.species);
   const form = formFor(record.species, progress.stage);
   const pet = useMemo(() => new Companion(record.species, Math.random, {
@@ -4115,7 +4329,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   const memory = useRef();
   const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching, evolving: pet.evolving, canEvolve: pet.canEvolve });
   const [status, setStatus] = useState(snapshot);
-  const [settings, setSettings] = useState(false), [error, setError] = useState(""), [ready, setReady] = useState(false);
+  const [settings, setSettings] = useState(false), [error, setError] = useState(""), [ready, setReady] = useState(false), [focused, setFocused] = useState(null);
   useEffect(() => {
     setReady(false);
     setError("");
@@ -4135,6 +4349,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       season: () => season.current,
       weather: () => weather.current,
       placed: () => placed.current,
+      rewards: () => rewards.current,
+      focus: () => focusTarget.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
@@ -4160,8 +4376,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       if (debug?.pet === pet) delete debug.pet;
     };
   }, [pet]);
-  const placedKey = placed.current.join(",");
-  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey]);
+  const placedKey = placed.current.join(","), rewardsKey = rewards.current.join(",");
+  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey, rewardsKey]);
   const closeSettings = () => {
     setSettings(false);
     settingsButton.current?.focus();
@@ -4171,13 +4387,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     memory.current?.flush();
     setStatus(snapshot());
   };
-  function clickGarden(event) {
-    if (!ready || pet.evolving) return;
-    const box = canvas.current.getBoundingClientRect();
-    const p = runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
-    const hit = FORMS[form];
-    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
-    if (Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14)) pet.pet();
+  function actAt(p, companion) {
+    if (companion) pet.pet();
     else if (onTree(p)) {
       pet.investigate(p, "tree");
       pet.emit("leaves", { x: p.x, y: p.y });
@@ -4190,6 +4401,28 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     memory.current?.flush();
     setStatus(snapshot());
   }
+  function clickGarden(event) {
+    if (!ready || pet.evolving) return;
+    const box = canvas.current.getBoundingClientRect();
+    const p = runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
+    const hit = FORMS[form];
+    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
+    actAt(p, Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14));
+  }
+  const setFocus = (index) => {
+    focusTarget.current = index;
+    setFocused(index);
+  };
+  function keyGarden(event) {
+    const action = keyboardAction(event.key, focused);
+    if (!action) return;
+    event.preventDefault();
+    if (action.type === "clear") return setFocus(null);
+    if (action.type === "move") return setFocus(action.index);
+    if (!ready || pet.evolving) return;
+    const target = TARGETS[action.index];
+    actAt(target.point || { x: pet.x, y: pet.y }, target.id === "companion");
+  }
   const s = SPECIES[record.species], currentForm = FORMS[form];
   return /* @__PURE__ */ jsxs("div", { className: "hp-living", children: [
     /* @__PURE__ */ jsx("div", { className: "hp-scene-column", children: /* @__PURE__ */ jsxs("div", { className: "hp-stage", children: [
@@ -4199,10 +4432,17 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
           ref: canvas,
           width: "640",
           height: "480",
+          tabIndex: 0,
           onClick: clickGarden,
-          "aria-label": `${record.nickname}, a ${currentForm.name}, in a pixel-art garden. Click the Pok\xE9mon to pet it, the grass to call it over, or the tree, pond and flowers to explore together.`
+          onKeyDown: keyGarden,
+          onFocus: () => {
+            if (focusTarget.current === null && canvas.current?.matches?.(":focus-visible")) setFocus(0);
+          },
+          onBlur: () => setFocus(null),
+          "aria-label": `${record.nickname}, a ${currentForm.name}, in a pixel-art garden. Click the Pok\xE9mon to pet it, the grass to call it over, or the tree, pond and flowers to explore together. With the garden focused, arrow keys choose the Pok\xE9mon, tree, pond, flowers or meadow, and Enter acts on the choice.`
         }
       ),
+      /* @__PURE__ */ jsx("span", { className: "hp-sr-only", "aria-live": "polite", children: announce(focused) }),
       !ready && /* @__PURE__ */ jsx("div", { className: "hp-loading", role: "status", children: error || "Opening the garden\u2026" })
     ] }) }),
     /* @__PURE__ */ jsxs("div", { className: "hp-companion-column", children: [
@@ -4271,7 +4511,7 @@ function App({ store, ctx, bridge }) {
       ] }),
       /* @__PURE__ */ jsxs("span", { className: "hp-version", children: [
         "v",
-        "0.6.2".split(".").slice(0, 2).join(".")
+        "0.7.0".split(".").slice(0, 2).join(".")
       ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "hp-scroll", children: [
@@ -4310,7 +4550,7 @@ function App({ store, ctx, bridge }) {
 }
 
 // src/styles.css
-var styles_default = '.hp-root {\n  --hp-bg: var(--ui-bg-editor, #f7f7ef);\n  --hp-surface: var(--ui-bg-elevated, #fffef7);\n  --hp-text: var(--ui-text-primary, #343d34);\n  --hp-muted: var(--ui-text-tertiary, #75816f);\n  --hp-line: var(--ui-stroke-secondary, #dfe3d5);\n  --hp-accent: var(--ui-accent, #547653);\n  height: 100%;\n  width: 100%;\n  min-width: 220px;\n  display: flex;\n  flex-direction: column;\n  background: var(--hp-bg);\n  color: var(--hp-text);\n  font:\n    13px/1.5 "Segoe UI",\n    system-ui,\n    sans-serif;\n  container-type: size;\n  isolation: isolate;\n  box-sizing: border-box;\n  text-align: left;\n}\n.hp-root * {\n  box-sizing: border-box;\n}\n.hp-root button,\n.hp-root input {\n  font: inherit;\n}\n.hp-root button {\n  cursor: pointer;\n}\n.hp-root button:disabled {\n  cursor: default;\n  opacity: 0.5;\n}\n.hp-root button:focus-visible,\n.hp-root input:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: 3px;\n}\n.hp-root button {\n  color: inherit;\n}\n.hp-root h2,\n.hp-root h3,\n.hp-root p {\n  margin: 0;\n}\n.hp-header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 14px 18px;\n  border-bottom: 1px solid var(--hp-line);\n  font-size: 12px;\n  flex-shrink: 0;\n  letter-spacing: -0.15px;\n}\n.hp-brand-icon {\n  display: grid;\n  place-items: center;\n  color: var(--hp-accent);\n}\n.hp-header strong {\n  font-weight: 600;\n}\n.hp-version {\n  margin-left: auto;\n  color: var(--hp-muted);\n  font: 10px monospace;\n  border: 1px solid var(--hp-line);\n  border-radius: 4px;\n  padding: 1px 5px;\n}\n.hp-scroll {\n  overflow: auto;\n  flex: 1;\n  min-height: 0;\n  scrollbar-width: thin;\n}\n.hp-footer {\n  display: flex;\n  justify-content: space-between;\n  gap: 8px;\n  padding: 12px 18px;\n  border-top: 1px solid var(--hp-line);\n  color: var(--hp-muted);\n  font-size: 10px;\n  flex-shrink: 0;\n}\n.hp-footer > span:first-child {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n.hp-footer > span:last-child {\n  font: 8px/15px monospace;\n  letter-spacing: 1px;\n}\n.hp-footer i,\n.hp-garden-label i {\n  display: inline-block;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-accent);\n}\n.hp-choice {\n  padding: 26px 18px 15px;\n}\n.hp-intro {\n  text-align: center;\n  margin-bottom: 24px;\n}\n.hp-eyebrow {\n  font: 9px/1.5 monospace;\n  letter-spacing: 1.7px;\n  color: var(--hp-muted);\n}\n.hp-intro h2 {\n  font:\n    500 27px/1.2 Georgia,\n    serif;\n  letter-spacing: -0.8px;\n  margin: 12px 0;\n}\n.hp-intro p {\n  color: var(--hp-muted);\n  font-size: 12px;\n  line-height: 1.65;\n}\n.hp-starters {\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));\n  gap: 7px;\n}\n.hp-card {\n  position: relative;\n  border: 1px solid var(--hp-line);\n  border-radius: 10px;\n  background: var(--hp-surface);\n  padding: 12px 4px 10px;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  min-width: 0;\n  transition:\n    border-color 0.15s,\n    background 0.15s;\n}\n.hp-card[aria-pressed="true"] {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 9%, var(--hp-surface));\n  box-shadow: 0 0 0 1px var(--hp-accent);\n}\n.hp-number {\n  align-self: flex-start;\n  color: var(--hp-muted);\n  font: 8px monospace;\n  margin-left: 6px;\n}\n.hp-choice-dot {\n  position: absolute;\n  right: 8px;\n  top: 12px;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-line);\n}\n.hp-card[aria-pressed="true"] .hp-choice-dot {\n  background: var(--hp-accent);\n}\n.hp-preview {\n  width: 100%;\n  height: 85px;\n  image-rendering: pixelated;\n}\n.hp-card strong {\n  font-size: 11px;\n  letter-spacing: -0.3px;\n}\n.hp-type {\n  font-size: 9px;\n  margin-top: 3px;\n  color: var(--hp-muted);\n}\n.hp-trait {\n  text-align: center;\n  font-size: 12px !important;\n  padding: 17px 0 21px;\n}\n.hp-trait span {\n  display: block;\n  font-size: 10px;\n  color: var(--hp-muted);\n  margin-top: 4px;\n}\n.hp-label {\n  display: flex;\n  justify-content: space-between;\n  font-size: 11px;\n  margin-bottom: 8px;\n}\n.hp-label span {\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-root input:not([type="checkbox"]) {\n  width: 100%;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  color: var(--hp-text);\n  padding: 10px 12px;\n  min-width: 0;\n}\n.hp-root input::placeholder {\n  color: var(--hp-muted);\n}\n.hp-primary {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 13px;\n  width: 100%;\n  border: 0;\n  border-radius: 7px;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  padding: 12px;\n  margin-top: 12px;\n  font-weight: 600 !important;\n  font-size: 12px !important;\n}\n.hp-primary:hover,\n.hp-small-primary:hover {\n  filter: brightness(1.08);\n}\n.hp-fine {\n  font-size: 9px !important;\n  line-height: 1.7;\n  color: var(--hp-muted);\n  text-align: center;\n  margin-top: 18px !important;\n}\n.hp-text-button {\n  background: none;\n  border: 0;\n  display: block;\n  margin: 13px auto 0;\n  font-size: 11px !important;\n  color: var(--hp-muted) !important;\n  text-decoration: underline;\n  text-underline-offset: 3px;\n}\n.hp-living {\n  padding: 18px;\n}\n.hp-garden-label {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  margin-bottom: 12px;\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-garden-label > span:first-child {\n  display: flex;\n  gap: 6px;\n  align-items: center;\n  font: 9px monospace;\n  letter-spacing: 1.1px;\n}\n.hp-garden-label > span:last-child {\n  font-family: Georgia, serif;\n  font-style: italic;\n  font-size: 12px;\n}\n.hp-stage {\n  width: 100%;\n  aspect-ratio: 4/3;\n  position: relative;\n  border-radius: 10px;\n  overflow: hidden;\n  border: 1px solid color-mix(in srgb, var(--hp-accent) 25%, transparent);\n  background: var(--hp-surface);\n}\n.hp-stage canvas {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  cursor: pointer;\n  color: var(--hp-text);\n}\n.hp-loading {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-items: center;\n  background: var(--hp-surface);\n  font-size: 12px;\n  padding: 20px;\n  text-align: center;\n}\n.hp-scene-foot {\n  display: flex;\n  justify-content: space-between;\n  padding-top: 8px;\n  font: 7px monospace;\n  letter-spacing: 1.25px;\n  color: var(--hp-muted);\n}\n.hp-companion-column {\n  padding-top: 23px;\n}\n.hp-card-level {\n  color: var(--hp-muted);\n  font: 9px monospace;\n  margin-top: 5px;\n}\n.hp-growth {\n  margin-top: 15px;\n  font-size: 10px;\n  color: var(--hp-muted);\n}\n.hp-growth-line {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: baseline;\n  justify-content: space-between;\n  gap: 4px 10px;\n  margin-bottom: 7px;\n}\n.hp-growth-line strong { color: var(--hp-text); margin-left: 5px; font-weight: 500; }\n.hp-growth progress {\n  display: block;\n  appearance: none;\n  width: 100%;\n  height: 5px;\n  border: none;\n  border-radius: 4px;\n  overflow: hidden;\n  background: var(--hp-line);\n  accent-color: var(--hp-accent);\n}\n.hp-growth progress::-webkit-progress-bar { background: var(--hp-line); }\n.hp-growth progress::-webkit-progress-value { background: var(--hp-accent); border-radius: 4px; }\n.hp-growth progress::-moz-progress-bar { background: var(--hp-accent); }\n.hp-growth-notice { margin-top: 8px !important; color: var(--hp-accent); }\n.hp-growth-help { margin-top: 9px; line-height: 1.65; }\n.hp-growth-help summary { cursor: pointer; width: fit-content; }\n.hp-growth-help p { margin-top: 7px !important; }\n.hp-evolve-offer {\n  margin-top: 10px;\n  width: 100%;\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  justify-content: space-between;\n  padding: 9px 10px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  text-align: left;\n  font-size: 11px !important;\n  color: var(--hp-accent) !important;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-evolution-choice {\n  margin-top: 10px;\n  padding: 12px;\n  border: 1px solid var(--hp-line);\n  border-radius: 9px;\n  background: var(--hp-surface);\n  line-height: 1.6;\n}\n.hp-evolution-choice .hp-preview { float: right; width: 76px; height: 76px; object-fit: contain; }\n.hp-evolution-choice p { color: var(--hp-text); margin-bottom: 8px !important; }\n.hp-evolution-choice small { display: block; font-size: 10px; }\n.hp-evolution-actions { clear: both; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }\n.hp-evolution-actions button { border: 1px solid var(--hp-line); border-radius: 6px; padding: 8px; font-size: 11px !important; background: var(--hp-surface); }\n.hp-evolution-actions .hp-small-primary { background: var(--hp-accent); }\n.hp-evolution-choice > small:last-child { margin-top: 8px; }\n.hp-name-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 12px;\n}\n.hp-name-row > div {\n  min-width: 0;\n}\n.hp-name-row h2 {\n  font:\n    500 27px/1.3 Georgia,\n    serif;\n  margin-top: 4px;\n  overflow-wrap: anywhere;\n  letter-spacing: -0.5px;\n}\n.hp-badge {\n  border: 1px solid var(--hp-line);\n  padding: 4px 9px;\n  border-radius: 20px;\n  font-size: 10px;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-status {\n  font-size: 12px;\n  color: var(--hp-muted);\n  margin-top: 5px !important;\n  min-height: 36px;\n}\n.hp-controls {\n  display: flex;\n  gap: 8px;\n  margin-top: 12px;\n}\n.hp-controls > button {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  padding: 10px;\n  white-space: nowrap;\n  font-size: 12px;\n  flex: 1;\n}\n.hp-controls > button:hover:not(:disabled) {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 6%, var(--hp-surface));\n}\n.hp-icon-button {\n  background: none;\n  border: 0;\n  display: grid;\n  place-items: center;\n  padding: 6px;\n  flex: 0 0 39px !important;\n}\n.hp-note {\n  border-top: 1px solid var(--hp-line);\n  margin-top: 22px;\n  padding-top: 17px;\n  display: flex;\n  gap: 10px;\n  align-items: center;\n  color: var(--hp-muted);\n}\n.hp-note p {\n  font-size: 11px;\n}\n.hp-note small {\n  display: block;\n  font-size: 10px;\n  margin-top: 3px;\n  opacity: 0.8;\n}\n.hp-note-icon {\n  display: flex;\n  opacity: 0.8;\n}\n.hp-settings {\n  margin-top: 18px;\n  border-top: 1px solid var(--hp-line);\n  padding-top: 13px;\n}\n.hp-section-title {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 10px;\n}\n.hp-section-title h3 {\n  font-size: 12px;\n  font-weight: 500;\n}\n.hp-input-row {\n  display: flex;\n  gap: 7px;\n}\n.hp-small-primary {\n  border: 0;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  border-radius: 7px;\n  padding: 0 12px;\n  font-size: 11px !important;\n}\n.hp-motion {\n  display: flex;\n  align-items: flex-start;\n  gap: 9px;\n  margin: 17px 0;\n  font-size: 11px;\n}\n.hp-motion input {\n  accent-color: var(--hp-accent);\n  margin: 2px 0;\n}\n.hp-motion small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  line-height: 1.6;\n  margin-top: 4px;\n}\n.hp-setting-action {\n  display: flex;\n  align-items: center;\n  gap: 9px;\n  width: 100%;\n  padding: 10px 0;\n  border: 0;\n  border-top: 1px solid var(--hp-line);\n  background: none;\n  text-align: left;\n  font-size: 11px !important;\n}\n.hp-setting-action svg:last-child:not(:first-child) {\n  margin-left: auto;\n}\n.hp-warning {\n  padding: 10px 18px;\n  font-size: 11px;\n  color: var(--hp-text);\n}\n.hp-motion-note {\n  margin-top: 12px !important;\n}\n.hp-status-dot {\n  margin-left: 1px;\n}\n@container (max-width:290px) {\n  .hp-choice,\n  .hp-living {\n    padding: 15px 12px;\n  }\n  .hp-card strong {\n    font-size: 9px;\n  }\n  .hp-preview {\n    height: 72px;\n  }\n  .hp-starters {\n    gap: 5px;\n  }\n  .hp-card {\n    padding-top: 9px;\n  }\n  .hp-number {\n    font-size: 7px;\n  }\n  .hp-controls > button {\n    gap: 5px;\n    padding: 9px 7px;\n    font-size: 11px;\n  }\n  .hp-footer > span:last-child {\n    display: none;\n  }\n  .hp-intro h2 {\n    font-size: 25px;\n  }\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-living {\n    display: grid;\n    grid-template-columns: minmax(220px, 1fr) minmax(200px, 0.85fr);\n    gap: 24px;\n    max-width: 850px;\n    margin: auto;\n  }\n  .hp-companion-column {\n    padding-top: 18px;\n  }\n  .hp-note {\n    margin-top: 15px;\n  }\n  .hp-stage {\n    max-width: 360px;\n  }\n  .hp-choice {\n    max-width: 550px;\n    margin: auto;\n  }\n  .hp-intro {\n    margin-bottom: 15px;\n  }\n  .hp-intro h2 {\n    font-size: 23px;\n  }\n  .hp-intro br {\n    display: none;\n  }\n  .hp-starters {\n    max-width: 350px;\n    margin: auto;\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .hp-root {\n    --hp-bg: var(--ui-bg-editor, #202820);\n    --hp-surface: var(--ui-bg-elevated, #283128);\n    --hp-text: var(--ui-text-primary, #e0e4d5);\n    --hp-muted: var(--ui-text-tertiary, #a0af98);\n    --hp-line: var(--ui-stroke-secondary, #3c4939);\n    --hp-accent: var(--ui-accent, #8aa77c);\n  }\n}\n@media (prefers-reduced-motion: reduce) {\n  .hp-root * {\n    transition: none !important;\n    animation: none !important;\n  }\n}\n/* Keep the initial choice and primary controls within a compact dock. */\n.hp-choice {\n  padding-top: 20px;\n}\n.hp-intro {\n  margin-bottom: 18px;\n}\n.hp-preview {\n  height: 76px;\n}\n.hp-trait {\n  padding: 13px 0 15px;\n}\n.hp-companion-column {\n  padding-top: 18px;\n}\n.hp-status {\n  min-height: 28px;\n}\n.hp-controls {\n  margin-top: 8px;\n}\n.hp-note {\n  margin-top: 16px;\n  padding-top: 12px;\n}\n.hp-note {\n  margin-top: 12px;\n  padding-top: 10px;\n}\n.hp-companion-column {\n  padding-top: 14px;\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-scene-column {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n  }\n  .hp-garden-label,\n  .hp-scene-foot {\n    align-self: stretch;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 165px) * 4 / 3));\n    min-width: 160px;\n    max-width: 360px;\n  }\n  .hp-companion-column {\n    padding-top: 8px;\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-note,\n  .hp-scene-foot {\n    display: none;\n  }\n  .hp-living {\n    padding: 12px 18px;\n  }\n  .hp-companion-column {\n    padding-top: 0;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 140px) * 4 / 3));\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-stage {\n    min-width: 152px;\n  }\n}\n\n/* v0.2 \u2014 roomier garden, four compact controls, sky picker. */\n.hp-living {\n  padding: 12px;\n}\n.hp-stage {\n  border-radius: 8px;\n  background: #88c36b;\n  box-shadow: 0 1px 0 color-mix(in srgb, var(--hp-text) 8%, transparent);\n}\n.hp-companion-column {\n  padding-top: 12px;\n}\n.hp-name-row {\n  align-items: flex-start;\n}\n.hp-name-row h2 {\n  font-size: 22px;\n  margin-top: 0;\n  line-height: 1.2;\n}\n.hp-status {\n  min-height: 0;\n  margin-top: 2px !important;\n}\n.hp-controls {\n  gap: 6px;\n  margin-top: 10px;\n}\n.hp-controls > button {\n  padding: 8px 6px;\n  gap: 6px;\n  min-width: 0;\n}\n.hp-controls > button > span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.hp-controls > button:active:not(:disabled) {\n  transform: translateY(1px);\n}\n.hp-hint {\n  display: flex;\n  gap: 8px;\n  align-items: flex-start;\n  margin-top: 12px !important;\n  font-size: 11px;\n  color: var(--hp-muted);\n  line-height: 1.5;\n}\n.hp-hint svg {\n  flex-shrink: 0;\n  margin-top: 2px;\n}\n.hp-sky {\n  margin-top: 16px;\n}\n.hp-sky small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  margin-top: 6px;\n}\n.hp-segmented {\n  display: flex;\n  margin-top: 6px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  overflow: hidden;\n}\n.hp-segmented button {\n  flex: 1;\n  border: 0;\n  background: var(--hp-surface);\n  padding: 6px 2px;\n  font-size: 10.5px !important;\n  min-width: 0;\n}\n.hp-segmented button + button {\n  border-left: 1px solid var(--hp-line);\n}\n.hp-segmented button[aria-checked="true"] {\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4);\n}\n@container (max-width: 330px) {\n  .hp-controls > button > span {\n    display: none;\n  }\n}\n@container (max-width: 290px) {\n  .hp-living {\n    padding: 10px;\n  }\n}\n.hp-preview {\n  object-fit: contain;\n  image-rendering: pixelated;\n}\n.hp-memories { margin-top: 12px; padding: 14px 0 0; border-top: 1px solid var(--hp-line); }\n.hp-memories dl { margin: 10px 0; display: grid; gap: 10px; font-size: 11px; }\n.hp-memories dl > div { display: grid; grid-template-columns: 1fr 1.3fr; gap: 12px; }\n.hp-memories dt { color: var(--hp-muted); }\n.hp-memories dd { margin: 0; text-align: right; }\n.hp-memories time { display: block; color: var(--hp-muted); font-size: 9px; margin-top: 3px; }\n.hp-memories p { font-size: 10px; line-height: 1.6; color: var(--hp-muted); }\n.hp-season .hp-segmented button { padding-inline: 4px; font-size: 10px; }\n.hp-hemisphere { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; }\n.hp-keepsakes { margin: 4px 0 10px; }\n.hp-keepsakes .hp-label small { color: var(--hp-muted); font-weight: 400; margin-left: 6px; }\n.hp-keepsakes ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }\n.hp-keepsakes li { font-size: 10px; padding: 3px 8px; border: 1px solid var(--hp-line); border-radius: 999px; }\n.hp-keepsakes > small { display: block; margin-top: 6px; font-size: 10px; color: var(--hp-muted); line-height: 1.5; }\n\n.hp-keepsakes li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }\n.hp-place { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hp-line, rgba(0,0,0,.18)); background: transparent; color: inherit; cursor: pointer; }\n.hp-place[aria-pressed="true"] { background: var(--hp-accent-soft, rgba(95,154,79,.18)); }\n.hp-place:disabled { opacity: .45; cursor: default; }\n';
+var styles_default = '.hp-root {\n  --hp-bg: var(--ui-bg-editor, #f7f7ef);\n  --hp-surface: var(--ui-bg-elevated, #fffef7);\n  --hp-text: var(--ui-text-primary, #343d34);\n  --hp-muted: var(--ui-text-tertiary, #75816f);\n  --hp-line: var(--ui-stroke-secondary, #dfe3d5);\n  --hp-accent: var(--ui-accent, #547653);\n  height: 100%;\n  width: 100%;\n  min-width: 220px;\n  display: flex;\n  flex-direction: column;\n  background: var(--hp-bg);\n  color: var(--hp-text);\n  font:\n    13px/1.5 "Segoe UI",\n    system-ui,\n    sans-serif;\n  container-type: size;\n  isolation: isolate;\n  box-sizing: border-box;\n  text-align: left;\n}\n.hp-root * {\n  box-sizing: border-box;\n}\n.hp-root button,\n.hp-root input {\n  font: inherit;\n}\n.hp-root button {\n  cursor: pointer;\n}\n.hp-root button:disabled {\n  cursor: default;\n  opacity: 0.5;\n}\n.hp-root button:focus-visible,\n.hp-root input:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: 3px;\n}\n.hp-root button {\n  color: inherit;\n}\n.hp-root h2,\n.hp-root h3,\n.hp-root p {\n  margin: 0;\n}\n.hp-header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 14px 18px;\n  border-bottom: 1px solid var(--hp-line);\n  font-size: 12px;\n  flex-shrink: 0;\n  letter-spacing: -0.15px;\n}\n.hp-brand-icon {\n  display: grid;\n  place-items: center;\n  color: var(--hp-accent);\n}\n.hp-header strong {\n  font-weight: 600;\n}\n.hp-version {\n  margin-left: auto;\n  color: var(--hp-muted);\n  font: 10px monospace;\n  border: 1px solid var(--hp-line);\n  border-radius: 4px;\n  padding: 1px 5px;\n}\n.hp-scroll {\n  overflow: auto;\n  flex: 1;\n  min-height: 0;\n  scrollbar-width: thin;\n}\n.hp-footer {\n  display: flex;\n  justify-content: space-between;\n  gap: 8px;\n  padding: 12px 18px;\n  border-top: 1px solid var(--hp-line);\n  color: var(--hp-muted);\n  font-size: 10px;\n  flex-shrink: 0;\n}\n.hp-footer > span:first-child {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n.hp-footer > span:last-child {\n  font: 8px/15px monospace;\n  letter-spacing: 1px;\n}\n.hp-footer i,\n.hp-garden-label i {\n  display: inline-block;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-accent);\n}\n.hp-choice {\n  padding: 26px 18px 15px;\n}\n.hp-intro {\n  text-align: center;\n  margin-bottom: 24px;\n}\n.hp-eyebrow {\n  font: 9px/1.5 monospace;\n  letter-spacing: 1.7px;\n  color: var(--hp-muted);\n}\n.hp-intro h2 {\n  font:\n    500 27px/1.2 Georgia,\n    serif;\n  letter-spacing: -0.8px;\n  margin: 12px 0;\n}\n.hp-intro p {\n  color: var(--hp-muted);\n  font-size: 12px;\n  line-height: 1.65;\n}\n.hp-starters {\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));\n  gap: 7px;\n}\n.hp-card {\n  position: relative;\n  border: 1px solid var(--hp-line);\n  border-radius: 10px;\n  background: var(--hp-surface);\n  padding: 12px 4px 10px;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  min-width: 0;\n  transition:\n    border-color 0.15s,\n    background 0.15s;\n}\n.hp-card[aria-pressed="true"] {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 9%, var(--hp-surface));\n  box-shadow: 0 0 0 1px var(--hp-accent);\n}\n.hp-number {\n  align-self: flex-start;\n  color: var(--hp-muted);\n  font: 8px monospace;\n  margin-left: 6px;\n}\n.hp-choice-dot {\n  position: absolute;\n  right: 8px;\n  top: 12px;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-line);\n}\n.hp-card[aria-pressed="true"] .hp-choice-dot {\n  background: var(--hp-accent);\n}\n.hp-preview {\n  width: 100%;\n  height: 85px;\n  image-rendering: pixelated;\n}\n.hp-card strong {\n  font-size: 11px;\n  letter-spacing: -0.3px;\n}\n.hp-type {\n  font-size: 9px;\n  margin-top: 3px;\n  color: var(--hp-muted);\n}\n.hp-trait {\n  text-align: center;\n  font-size: 12px !important;\n  padding: 17px 0 21px;\n}\n.hp-trait span {\n  display: block;\n  font-size: 10px;\n  color: var(--hp-muted);\n  margin-top: 4px;\n}\n.hp-label {\n  display: flex;\n  justify-content: space-between;\n  font-size: 11px;\n  margin-bottom: 8px;\n}\n.hp-label span {\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-root input:not([type="checkbox"]) {\n  width: 100%;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  color: var(--hp-text);\n  padding: 10px 12px;\n  min-width: 0;\n}\n.hp-root input::placeholder {\n  color: var(--hp-muted);\n}\n.hp-primary {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 13px;\n  width: 100%;\n  border: 0;\n  border-radius: 7px;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  padding: 12px;\n  margin-top: 12px;\n  font-weight: 600 !important;\n  font-size: 12px !important;\n}\n.hp-primary:hover,\n.hp-small-primary:hover {\n  filter: brightness(1.08);\n}\n.hp-fine {\n  font-size: 9px !important;\n  line-height: 1.7;\n  color: var(--hp-muted);\n  text-align: center;\n  margin-top: 18px !important;\n}\n.hp-text-button {\n  background: none;\n  border: 0;\n  display: block;\n  margin: 13px auto 0;\n  font-size: 11px !important;\n  color: var(--hp-muted) !important;\n  text-decoration: underline;\n  text-underline-offset: 3px;\n}\n.hp-living {\n  padding: 18px;\n}\n.hp-garden-label {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  margin-bottom: 12px;\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-garden-label > span:first-child {\n  display: flex;\n  gap: 6px;\n  align-items: center;\n  font: 9px monospace;\n  letter-spacing: 1.1px;\n}\n.hp-garden-label > span:last-child {\n  font-family: Georgia, serif;\n  font-style: italic;\n  font-size: 12px;\n}\n.hp-stage {\n  width: 100%;\n  aspect-ratio: 4/3;\n  position: relative;\n  border-radius: 10px;\n  overflow: hidden;\n  border: 1px solid color-mix(in srgb, var(--hp-accent) 25%, transparent);\n  background: var(--hp-surface);\n}\n.hp-stage canvas {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  cursor: pointer;\n  color: var(--hp-text);\n}\n.hp-loading {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-items: center;\n  background: var(--hp-surface);\n  font-size: 12px;\n  padding: 20px;\n  text-align: center;\n}\n.hp-scene-foot {\n  display: flex;\n  justify-content: space-between;\n  padding-top: 8px;\n  font: 7px monospace;\n  letter-spacing: 1.25px;\n  color: var(--hp-muted);\n}\n.hp-companion-column {\n  padding-top: 23px;\n}\n.hp-card-level {\n  color: var(--hp-muted);\n  font: 9px monospace;\n  margin-top: 5px;\n}\n.hp-growth {\n  margin-top: 15px;\n  font-size: 10px;\n  color: var(--hp-muted);\n}\n.hp-growth-line {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: baseline;\n  justify-content: space-between;\n  gap: 4px 10px;\n  margin-bottom: 7px;\n}\n.hp-growth-line strong { color: var(--hp-text); margin-left: 5px; font-weight: 500; }\n.hp-growth progress {\n  display: block;\n  appearance: none;\n  width: 100%;\n  height: 5px;\n  border: none;\n  border-radius: 4px;\n  overflow: hidden;\n  background: var(--hp-line);\n  accent-color: var(--hp-accent);\n}\n.hp-growth progress::-webkit-progress-bar { background: var(--hp-line); }\n.hp-growth progress::-webkit-progress-value { background: var(--hp-accent); border-radius: 4px; }\n.hp-growth progress::-moz-progress-bar { background: var(--hp-accent); }\n.hp-growth-notice { margin-top: 8px !important; color: var(--hp-accent); }\n.hp-growth-help { margin-top: 9px; line-height: 1.65; }\n.hp-growth-help summary { cursor: pointer; width: fit-content; }\n.hp-growth-help p { margin-top: 7px !important; }\n.hp-evolve-offer {\n  margin-top: 10px;\n  width: 100%;\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  justify-content: space-between;\n  padding: 9px 10px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  text-align: left;\n  font-size: 11px !important;\n  color: var(--hp-accent) !important;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-evolution-choice {\n  margin-top: 10px;\n  padding: 12px;\n  border: 1px solid var(--hp-line);\n  border-radius: 9px;\n  background: var(--hp-surface);\n  line-height: 1.6;\n}\n.hp-evolution-choice .hp-preview { float: right; width: 76px; height: 76px; object-fit: contain; }\n.hp-evolution-choice p { color: var(--hp-text); margin-bottom: 8px !important; }\n.hp-evolution-choice small { display: block; font-size: 10px; }\n.hp-evolution-actions { clear: both; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }\n.hp-evolution-actions button { border: 1px solid var(--hp-line); border-radius: 6px; padding: 8px; font-size: 11px !important; background: var(--hp-surface); }\n.hp-evolution-actions .hp-small-primary { background: var(--hp-accent); }\n.hp-evolution-choice > small:last-child { margin-top: 8px; }\n.hp-name-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 12px;\n}\n.hp-name-row > div {\n  min-width: 0;\n}\n.hp-name-row h2 {\n  font:\n    500 27px/1.3 Georgia,\n    serif;\n  margin-top: 4px;\n  overflow-wrap: anywhere;\n  letter-spacing: -0.5px;\n}\n.hp-badge {\n  border: 1px solid var(--hp-line);\n  padding: 4px 9px;\n  border-radius: 20px;\n  font-size: 10px;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-status {\n  font-size: 12px;\n  color: var(--hp-muted);\n  margin-top: 5px !important;\n  min-height: 36px;\n}\n.hp-controls {\n  display: flex;\n  gap: 8px;\n  margin-top: 12px;\n}\n.hp-controls > button {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  padding: 10px;\n  white-space: nowrap;\n  font-size: 12px;\n  flex: 1;\n}\n.hp-controls > button:hover:not(:disabled) {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 6%, var(--hp-surface));\n}\n.hp-icon-button {\n  background: none;\n  border: 0;\n  display: grid;\n  place-items: center;\n  padding: 6px;\n  flex: 0 0 39px !important;\n}\n.hp-note {\n  border-top: 1px solid var(--hp-line);\n  margin-top: 22px;\n  padding-top: 17px;\n  display: flex;\n  gap: 10px;\n  align-items: center;\n  color: var(--hp-muted);\n}\n.hp-note p {\n  font-size: 11px;\n}\n.hp-note small {\n  display: block;\n  font-size: 10px;\n  margin-top: 3px;\n  opacity: 0.8;\n}\n.hp-note-icon {\n  display: flex;\n  opacity: 0.8;\n}\n.hp-settings {\n  margin-top: 18px;\n  border-top: 1px solid var(--hp-line);\n  padding-top: 13px;\n}\n.hp-section-title {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 10px;\n}\n.hp-section-title h3 {\n  font-size: 12px;\n  font-weight: 500;\n}\n.hp-input-row {\n  display: flex;\n  gap: 7px;\n}\n.hp-small-primary {\n  border: 0;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  border-radius: 7px;\n  padding: 0 12px;\n  font-size: 11px !important;\n}\n.hp-motion {\n  display: flex;\n  align-items: flex-start;\n  gap: 9px;\n  margin: 17px 0;\n  font-size: 11px;\n}\n.hp-motion input {\n  accent-color: var(--hp-accent);\n  margin: 2px 0;\n}\n.hp-motion small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  line-height: 1.6;\n  margin-top: 4px;\n}\n.hp-setting-action {\n  display: flex;\n  align-items: center;\n  gap: 9px;\n  width: 100%;\n  padding: 10px 0;\n  border: 0;\n  border-top: 1px solid var(--hp-line);\n  background: none;\n  text-align: left;\n  font-size: 11px !important;\n}\n.hp-setting-action svg:last-child:not(:first-child) {\n  margin-left: auto;\n}\n.hp-warning {\n  padding: 10px 18px;\n  font-size: 11px;\n  color: var(--hp-text);\n}\n.hp-motion-note {\n  margin-top: 12px !important;\n}\n.hp-status-dot {\n  margin-left: 1px;\n}\n@container (max-width:290px) {\n  .hp-choice,\n  .hp-living {\n    padding: 15px 12px;\n  }\n  .hp-card strong {\n    font-size: 9px;\n  }\n  .hp-preview {\n    height: 72px;\n  }\n  .hp-starters {\n    gap: 5px;\n  }\n  .hp-card {\n    padding-top: 9px;\n  }\n  .hp-number {\n    font-size: 7px;\n  }\n  .hp-controls > button {\n    gap: 5px;\n    padding: 9px 7px;\n    font-size: 11px;\n  }\n  .hp-footer > span:last-child {\n    display: none;\n  }\n  .hp-intro h2 {\n    font-size: 25px;\n  }\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-living {\n    display: grid;\n    grid-template-columns: minmax(220px, 1fr) minmax(200px, 0.85fr);\n    gap: 24px;\n    max-width: 850px;\n    margin: auto;\n  }\n  .hp-companion-column {\n    padding-top: 18px;\n  }\n  .hp-note {\n    margin-top: 15px;\n  }\n  .hp-stage {\n    max-width: 360px;\n  }\n  .hp-choice {\n    max-width: 550px;\n    margin: auto;\n  }\n  .hp-intro {\n    margin-bottom: 15px;\n  }\n  .hp-intro h2 {\n    font-size: 23px;\n  }\n  .hp-intro br {\n    display: none;\n  }\n  .hp-starters {\n    max-width: 350px;\n    margin: auto;\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .hp-root {\n    --hp-bg: var(--ui-bg-editor, #202820);\n    --hp-surface: var(--ui-bg-elevated, #283128);\n    --hp-text: var(--ui-text-primary, #e0e4d5);\n    --hp-muted: var(--ui-text-tertiary, #a0af98);\n    --hp-line: var(--ui-stroke-secondary, #3c4939);\n    --hp-accent: var(--ui-accent, #8aa77c);\n  }\n}\n@media (prefers-reduced-motion: reduce) {\n  .hp-root * {\n    transition: none !important;\n    animation: none !important;\n  }\n}\n/* Keep the initial choice and primary controls within a compact dock. */\n.hp-choice {\n  padding-top: 20px;\n}\n.hp-intro {\n  margin-bottom: 18px;\n}\n.hp-preview {\n  height: 76px;\n}\n.hp-trait {\n  padding: 13px 0 15px;\n}\n.hp-companion-column {\n  padding-top: 18px;\n}\n.hp-status {\n  min-height: 28px;\n}\n.hp-controls {\n  margin-top: 8px;\n}\n.hp-note {\n  margin-top: 16px;\n  padding-top: 12px;\n}\n.hp-note {\n  margin-top: 12px;\n  padding-top: 10px;\n}\n.hp-companion-column {\n  padding-top: 14px;\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-scene-column {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n  }\n  .hp-garden-label,\n  .hp-scene-foot {\n    align-self: stretch;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 165px) * 4 / 3));\n    min-width: 160px;\n    max-width: 360px;\n  }\n  .hp-companion-column {\n    padding-top: 8px;\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-note,\n  .hp-scene-foot {\n    display: none;\n  }\n  .hp-living {\n    padding: 12px 18px;\n  }\n  .hp-companion-column {\n    padding-top: 0;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 140px) * 4 / 3));\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-stage {\n    min-width: 152px;\n  }\n}\n\n/* v0.2 \u2014 roomier garden, four compact controls, sky picker. */\n.hp-living {\n  padding: 12px;\n}\n.hp-stage {\n  border-radius: 8px;\n  background: #88c36b;\n  box-shadow: 0 1px 0 color-mix(in srgb, var(--hp-text) 8%, transparent);\n}\n.hp-companion-column {\n  padding-top: 12px;\n}\n.hp-name-row {\n  align-items: flex-start;\n}\n.hp-name-row h2 {\n  font-size: 22px;\n  margin-top: 0;\n  line-height: 1.2;\n}\n.hp-status {\n  min-height: 0;\n  margin-top: 2px !important;\n}\n.hp-controls {\n  gap: 6px;\n  margin-top: 10px;\n}\n.hp-controls > button {\n  padding: 8px 6px;\n  gap: 6px;\n  min-width: 0;\n}\n.hp-controls > button > span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.hp-controls > button:active:not(:disabled) {\n  transform: translateY(1px);\n}\n.hp-hint {\n  display: flex;\n  gap: 8px;\n  align-items: flex-start;\n  margin-top: 12px !important;\n  font-size: 11px;\n  color: var(--hp-muted);\n  line-height: 1.5;\n}\n.hp-hint svg {\n  flex-shrink: 0;\n  margin-top: 2px;\n}\n.hp-sky {\n  margin-top: 16px;\n}\n.hp-sky small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  margin-top: 6px;\n}\n.hp-segmented {\n  display: flex;\n  margin-top: 6px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  overflow: hidden;\n}\n.hp-segmented button {\n  flex: 1;\n  border: 0;\n  background: var(--hp-surface);\n  padding: 6px 2px;\n  font-size: 10.5px !important;\n  min-width: 0;\n}\n.hp-segmented button + button {\n  border-left: 1px solid var(--hp-line);\n}\n.hp-segmented button[aria-checked="true"] {\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4);\n}\n@container (max-width: 330px) {\n  .hp-controls > button > span {\n    display: none;\n  }\n}\n@container (max-width: 290px) {\n  .hp-living {\n    padding: 10px;\n  }\n}\n.hp-preview {\n  object-fit: contain;\n  image-rendering: pixelated;\n}\n.hp-memories { margin-top: 12px; padding: 14px 0 0; border-top: 1px solid var(--hp-line); }\n.hp-memories dl { margin: 10px 0; display: grid; gap: 10px; font-size: 11px; }\n.hp-memories dl > div { display: grid; grid-template-columns: 1fr 1.3fr; gap: 12px; }\n.hp-memories dt { color: var(--hp-muted); }\n.hp-memories dd { margin: 0; text-align: right; }\n.hp-memories time { display: block; color: var(--hp-muted); font-size: 9px; margin-top: 3px; }\n.hp-memories p { font-size: 10px; line-height: 1.6; color: var(--hp-muted); }\n.hp-season .hp-segmented button { padding-inline: 4px; font-size: 10px; }\n.hp-hemisphere { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; }\n.hp-keepsakes { margin: 4px 0 10px; }\n.hp-keepsakes .hp-label small { color: var(--hp-muted); font-weight: 400; margin-left: 6px; }\n.hp-keepsakes ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }\n.hp-keepsakes li { font-size: 10px; padding: 3px 8px; border: 1px solid var(--hp-line); border-radius: 999px; }\n.hp-keepsakes > small { display: block; margin-top: 6px; font-size: 10px; color: var(--hp-muted); line-height: 1.5; }\n\n.hp-keepsakes li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }\n.hp-place { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hp-line, rgba(0,0,0,.18)); background: transparent; color: inherit; cursor: pointer; }\n.hp-place[aria-pressed="true"] { background: var(--hp-accent-soft, rgba(95,154,79,.18)); }\n.hp-place:disabled { opacity: .45; cursor: default; }\n\n/* Keyboard access to the garden: a visible outline on the canvas, a ring drawn inside it, and\n   announcements for screen readers. */\n.hp-stage canvas:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: -2px;\n}\n.hp-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  overflow: hidden;\n  clip: rect(0 0 0 0);\n  clip-path: inset(50%);\n  white-space: nowrap;\n}\n';
 
 // src/plugin.jsx
 import { jsx as jsx2 } from "react/jsx-runtime";
@@ -4320,7 +4560,7 @@ var plugin_default = {
   defaultEnabled: true,
   register(ctx) {
     const style = document.createElement("style");
-    style.dataset.hermesPokemon = "0.6.2";
+    style.dataset.hermesPokemon = "0.7.0";
     style.textContent = styles_default;
     document.head.append(style);
     ctx.onDispose(() => style.remove());

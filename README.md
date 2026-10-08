@@ -1,4 +1,4 @@
-# Hermes Pokémon · 0.6.2
+# Hermes Pokémon · 0.7.0
 
 A small pixel-art garden beside your Hermes conversation. Choose Bulbasaur, Charmander, or Squirtle, give it a nickname, and spend a little time together.
 
@@ -39,6 +39,7 @@ The plugin uses the public [Desktop Plugin SDK](https://github.com/NousResearch/
 - **Click the grass** to call it over. Click the tree, pond or flowers to investigate together, with a different little reaction from each starter.
 - **Ball** throws a Poké Ball. It bounces and rolls; your Pokémon chases it, carries it back, then pauses proudly to present it.
 - **Berry** drops an Oran Berry nearby; your Pokémon looks up in anticipation, nods, walks over and eats it.
+- **Keyboard**: Tab to the garden, then use the arrow keys to move a small ring between your Pokémon, the tree, the pond, the flowers and the meadow. Enter or Space does what a click there would do; Escape clears the ring. A screen reader hears each choice.
 - **Settings**: rename, change starter, reset position, **garden light** (follow your clock, or pin dawn/day/dusk/night), **season**, **weather**, and extra quiet motion. System reduced motion is always respected. Escape closes settings.
 
 ## Life in the garden
@@ -55,11 +56,11 @@ When things are quiet, your companion sometimes carries a ball over and rolls it
 
 The garden itself moves: clouds drift, the pond shimmers and ripples (watch for the fish), reeds and grass sway, leaves fall from the tree, and fireflies come out at night.
 
-**Seasons.** The garden follows the calendar: blossoms in spring, fireflies in summer, orange leaves that fall and float on the pond in autumn, and gentle snow and frost in winter. Each starter has one seasonal habit: Bulbasaur watches blossoms drift down in spring, Charmander warms itself by its own tail flame in winter, and Squirtle watches leaves (autumn) or snowflakes (winter) settle on the pond. Settings can pin a season or switch to **Southern Hemisphere seasons**, since a device clock can't tell which hemisphere you're in.
+**Seasons.** The garden follows the calendar: blossoms in spring, fireflies in summer, orange leaves that fall and float on the pond in autumn, and gentle snow and frost in winter. Each starter has one seasonal habit: Bulbasaur watches blossoms drift down in spring, Charmander warms itself by its own tail flame in winter, and Squirtle watches leaves (autumn) or snowflakes (winter) settle on the pond. Settings can pin a season or switch to **Southern Hemisphere seasons**, since a device clock can't tell which hemisphere you're in. Day length follows the season too: summer evenings stay light until ten, and winter dusk falls before five. The moon keeps its real phase, waxing from the right and waning from the left (mirrored in the Southern Hemisphere), and a new moon leaves the pond dark.
 
 **Keepsakes.** When you explore the tree, pond or flowers together, your companion sometimes finds something small, like a smooth pebble, a red maple leaf or a snowdrop, and keeps it. There are 13 to find, some only in certain seasons. Settings shows the collection. Each is found once, and nothing needs looking after. Choose **Place** on up to four of them to set them out in the garden; your companion sometimes wanders over to check on one.
 
-**Milestones.** Day 30, day 100 and every yearly anniversary get a small celebration, and Settings shows how many days you've been together. Each is celebrated once, only near the day itself, so returning after a long break never replays old ones. Saves from earlier versions start counting from the upgrade.
+**Milestones.** Day 30, day 100 and every yearly anniversary get a small celebration, and Settings shows how many days you've been together. Each is celebrated once, only near the day itself, so returning after a long break never replays old ones. Saves from earlier versions start counting from the upgrade. Each milestone also leaves something behind, for keeps: a **garden bench** by the fence on day 30, a **paper lantern** on day 100 that glows at dusk and after dark, and **bunting** along the fence from the first anniversary. Your companion sometimes rests by the bench by day and sits in the lantern light at night. The rewards come from the milestones already saved, so an older save that has passed day 30 gets its bench on the next visit.
 
 **Showers.** On some days a few short showers pass through, 3 to 6 minutes each, fading in and out. They're picked from the date, so no weather service is needed; winter has its snow instead. Squirtle splashes about in the meadow, Charmander shelters under the tree to keep its flame dry, and Bulbasaur turns its bulb up to the rain, then shakes off. Settings can choose **Natural**, **Clear** or **Rain**.
 
@@ -113,9 +114,9 @@ npm run package
 npm run demo
 ```
 
-Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome, a **Long turn** (the preview clock jumps three minutes into a running turn) and a **Failed turn**, simulated **Web search**, **Terminal** and **Writing files** tool calls, and a **Wild visitor**. Seasons and weather can be pinned from Settings. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
+Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plugin** with a simulated SDK and explicitly labeled simulated events, including a simulated return to preview the welcome, a **Long turn** (the preview clock jumps three minutes into a running turn) and a **Failed turn**, simulated **Web search**, **Terminal** and **Writing files** tool calls, a turn finishing in an **Other chat**, a **Wild visitor**, and **Simulate day 100** to see milestone rewards. Seasons and weather can be pinned from Settings. Its localStorage is separate from Hermes plugin storage. Resize the pane, dock it beneath, switch themes, hide it, or reload it. `npm run install:plugin` installs the build into your local Hermes plugin directory, backing up an existing `plugin.js` first.
 
-`npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.6.2.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
+`npm run check:browser` runs the seven Playwright scripts in [tests/browser](tests/browser/README.md) against the built demo in headless Chromium (after `npx playwright install chromium`, once); CI runs them on every push. `npm run build` updates the committed `desktop/plugin.js` and the disk-install folder. `npm run package` verifies the bundle checksum and creates `release/hermes-pokemon-0.7.0.zip` with a matching `.sha256` file. The package uses `plugin.yaml` + `desktop/plugin.js`; source structure, storage and release details are in [docs/SDK.md](docs/SDK.md).
 
 ## Hermes awareness & compatibility
 
@@ -125,6 +126,7 @@ Open [the local preview](http://127.0.0.1:4173). It loads the **actual built plu
 - **Failed turns**: an error or a turn you stop gets a quiet look and a small nod, with no bubble and no confetti. After **two errors in a row**, it brings you the ball, a small invitation to take a break (at most once every 10 minutes; never with reduced motion; your Stop never counts as an error).
 - **What Hermes is doing**: when Hermes starts a web search or browser tool, your Pokémon looks out over the fence; a terminal command gets a curious head tilt; writing or patching files gets a little dig in the grass. Only the tool's name is read, never its arguments or results; other tools get no reaction, and reactions are at least 20 seconds apart because agents call tools in bursts.
 - **Waiting**: a focused `clarify` tool call gets a “?” bubble. Other kinds of pending input may not be detectable.
+- **Other chats**: when a turn finishes successfully in a session you are not looking at, your Pokémon glances toward the session list with a small “!”, then goes back to what it was doing. It never cheers for another chat, errors and stops elsewhere are ignored, glances are at least 30 seconds apart, and extra quiet mode shows only the bubble. Useful when sessions are tiled or running in the background.
 - Cues never cancel a fetch, a berry, a pet or a nap (a napping Pokémon just shows the bubble). Keeping company and the break offer wait until play finishes. Missing activity APIs leave the garden fully usable.
 - Animation pauses while hidden. Narrow panes, light/dark themes, reduced motion and clean disable/reload are supported.
 

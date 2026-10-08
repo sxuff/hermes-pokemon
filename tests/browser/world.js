@@ -1,4 +1,5 @@
-// Preview-only: v0.6 world features (tools, rain, late night, visitors, decorations, milestones).
+// Preview-only: v0.6 world features (tools, rain, late night, visitors, decorations, milestones)
+// and v0.7 (other chats, milestone rewards, the moon, keyboard access).
 // Resets this origin's demo companion, never Hermes storage.
 async (page) => {
   const errors = [];
@@ -130,6 +131,48 @@ async (page) => {
   await page.getByRole('button',{name:'Companion settings',exact:true}).click();
   check(/Days together\s*30/.test(await page.locator('.hp-memories').textContent()), 'days together not shown');
   await page.getByRole('button',{name:'Close settings'}).click();
+
+  // 7. v0.7: a glance toward another chat, what milestones leave behind, the moon, keyboard access.
+  await idle();
+  await page.evaluate(() => { __hermesPokemonDebug.pet.nextElsewhereAt = 0; });
+  await page.locator('[data-event="elsewhere"]').click();
+  await waitState('elsewhere', 5000);
+  check(await page.evaluate(() => __hermesPokemonDebug.pet.bubble?.kind === '!'), 'no glance bubble');
+  check(await page.evaluate(() => __hermesPokemonDebug.pet.rewards.join() === 'bench'), 'day 30 left no bench');
+  await page.locator('#milestone').click();
+  await ready();
+  await waitState('milestone', 25000);
+  check(/100 days together/.test(await page.locator('.hp-status').textContent()), 'day 100 caption');
+  check(await page.evaluate(() => JSON.stringify(__demo.diagnostics().saved.memories.squirtle.milestones) === '[30,100]'), 'day 30 not recorded quietly');
+  await page.waitForFunction(() => __hermesPokemonDebug.pet.rewards.join() === 'bench,lantern', null, {timeout: 25000});
+  await page.getByRole('button',{name:'Companion settings',exact:true}).click();
+  check(/A garden bench · A paper lantern/.test(await page.locator('.hp-memories').textContent()), 'rewards not listed');
+  await page.getByRole('radio',{name:'Night',exact:true}).click();
+  await page.getByRole('button',{name:'Close settings'}).click();
+  await page.waitForFunction(() => __hermesPokemonDebug.runtime().phase === 'night');
+  await page.evaluate(() => { const p = __hermesPokemonDebug.pet; p.phase = 'night'; p.start(p.rewardPlan()); });
+  await waitState('lanternlit', 20000);
+  check(/lantern light/.test(await page.locator('.hp-status').textContent()), 'lantern caption');
+  await page.waitForTimeout(600);
+  await page.locator('.hp-stage').screenshot({path:'docs/images/rewards-night.png'});
+  const moon = await page.evaluate(() => __hermesPokemonDebug.runtime().moon);
+  check(moon && moon.phase >= 0 && moon.phase < 1 && moon.flip === false, 'moon phase missing');
+  await page.getByRole('button',{name:'Companion settings',exact:true}).click();
+  await page.getByRole('radio',{name:'Day',exact:true}).click();
+  await page.getByRole('button',{name:'Close settings'}).click();
+  // Keyboard: Home selects the companion, arrows move the ring, Enter acts, Escape clears.
+  await idle();
+  await page.locator('.hp-stage canvas').focus();
+  await page.keyboard.press('Home');
+  check(/Your companion/.test(await page.locator('.hp-sr-only').textContent()), 'ring not announced');
+  await page.keyboard.press('ArrowRight');
+  check(/The old tree/.test(await page.locator('.hp-sr-only').textContent()), 'ring did not move');
+  await page.waitForTimeout(300);
+  await page.locator('.hp-stage').screenshot({path:'docs/images/keyboard-focus.png'});
+  await page.keyboard.press('Enter');
+  await waitState('investigating', 5000);
+  await page.keyboard.press('Escape');
+  check((await page.locator('.hp-sr-only').textContent()) === '', 'ring not cleared');
 
   check(errors.length === 0, 'page errors: ' + errors.join('; '));
   return `world checks passed (visitor: ${visitorName})`;

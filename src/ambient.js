@@ -7,12 +7,34 @@ import { POND, TREE, SUN_PATCH } from "./world.js";
 const inPondPoint = (x, y) => ((x - POND.x) / (POND.rx - 3)) ** 2 + ((y - POND.y) / (POND.ry - 2)) ** 2 <= 1;
 const GLINTS = [[-14, -3, 3, 1.7], [-6, 3, 2, 2.3], [3, -5, 3, 1.4], [10, 2, 2, 2.0], [-1, 6, 2, 1.1], [14, -1, 2, 2.6]];
 export const PHASES = ["dawn", "day", "dusk", "night"];
-export function phaseForHour(hour) {
-  if (hour >= 5 && hour < 8) return "dawn";
-  if (hour >= 8 && hour < 18) return "day";
-  if (hour >= 18 && hour < 20.5) return "dusk";
+// Day length follows the season: long summer evenings, early winter dusks. Hours are local
+// decimal hours for [dawn start, day start] and [dusk start, night start]. The season is
+// already flipped for the Southern Hemisphere, so these tables need no hemisphere of their own.
+export const DAYLIGHT = {
+  spring: { dawn: [5.5, 8], dusk: [18, 20.5] },
+  summer: { dawn: [4.5, 7], dusk: [19.5, 22] },
+  autumn: { dawn: [6, 8.5], dusk: [17.5, 20] },
+  winter: { dawn: [7, 9], dusk: [16.5, 18.5] },
+};
+const DEFAULT_DAYLIGHT = { dawn: [5, 8], dusk: [18, 20.5] };
+export function phaseForHour(hour, season) {
+  const { dawn, dusk } = DAYLIGHT[season] || DEFAULT_DAYLIGHT;
+  if (hour >= dawn[0] && hour < dawn[1]) return "dawn";
+  if (hour >= dawn[1] && hour < dusk[0]) return "day";
+  if (hour >= dusk[0] && hour < dusk[1]) return "dusk";
   return "night";
 }
+// The moon's real phase, 0 = new, 0.5 = full, from a reference new moon and the mean synodic
+// month. Accurate to within a day, which is all a seven-pixel moon can show.
+const NEW_MOON = Date.UTC(2000, 0, 6, 18, 14);
+const SYNODIC_DAYS = 29.530588853;
+export function moonPhase(date = new Date()) {
+  const t = date instanceof Date ? date.getTime() : NaN;
+  if (!Number.isFinite(t)) return 0.5;
+  const days = (t - NEW_MOON) / 86_400_000;
+  return ((days / SYNODIC_DAYS) % 1 + 1) % 1;
+}
+export const moonIllumination = (phase) => (1 - Math.cos(phase * 2 * Math.PI)) / 2;
 // Whole-scene grade: a multiply tint, plus how much "light" (fireflies, flame glow) shows.
 export const GRADES = {
   dawn: { tint: "#ffd9d2", sky: "#ffc7b8", glow: 0.25 },
@@ -62,6 +84,8 @@ export class Ambient {
     this.floaters = [];
     this.season = "summer";
     this.weather = "clear";
+    // Tonight's moon: its phase and, south of the equator, which side is lit.
+    this.moon = { phase: 0.5, flip: false };
     this.rainLevel = 0;
     // Fixed set of drops recycled forever: rain never allocates per frame.
     this.drops = Array.from({ length: 34 }, () => ({ x: random() * 176, y: random() * 124, speed: 65 + random() * 35 }));
@@ -467,7 +491,7 @@ export class Ambient {
     c.globalAlpha = 1;
   }
   // Lights are added after the scene grade so they glow in the dark.
-  drawLights(c, phase, glowSource, reduced) {
+  drawLights(c, phase, glowSource, reduced, lights = []) {
     const grade = GRADES[phase];
     const { dot, rect } = pen(c);
     const t = reduced ? 0 : this.time;
@@ -478,21 +502,36 @@ export class Ambient {
         if (x < 56 || (x > 126 && x < 140 && y < 13)) continue; // behind the tree and the moon
         if (Math.sin(t * 1.5 + i * 2.3) > -0.6) dot(x, y, i % 4 ? "#c9d4ff" : "#ffffff");
       }
-      rect(130, 4, 7, 7, "#f4f1d8");
-      rect(131, 3, 5, 9, "#f4f1d8");
-      rect(132, 5, 2, 2, "#dcd8bd");
-      rect(134, 8, 1, 1, "#dcd8bd");
-      // Moon on the water.
-      // Moon on the water: a soft column of short glints under the moon, shimmering gently.
-      const widths = [4, 3, 5, 2, 3, 1];
-      widths.forEach((w, i) => {
-        const y = POND.y - 6 + i * 2;
-        const x = Math.round(129 - w / 2 + (reduced ? 0 : Math.sin(t * 1.3 + i * 1.7) * 0.8));
-        if (!inPondPoint(x, y) || !inPondPoint(x + w - 1, y)) return;
-        c.globalAlpha = 0.5 - i * 0.06;
-        rect(x, y, w, 1, "#f4f1d8");
-      });
-      c.globalAlpha = 1;
+      // The moon keeps its real phase: the lit side grows from the right while waxing and
+      // shrinks from the left while waning (mirrored in the Southern Hemisphere).
+      const { phase: moon, flip } = this.moon;
+      const lit = moonIllumination(moon);
+      const edge = Math.cos(moon * 2 * Math.PI);
+      for (let y = 3; y <= 11; y++) {
+        const half = y === 3 || y === 11 ? 2 : 3, w = half + 0.5;
+        for (let x = 133 - half; x <= 133 + half; x++) {
+          const px = (x - 133) * (flip ? -1 : 1);
+          const bright = moon < 0.5 ? px > w * edge : px < -w * edge;
+          dot(x, y, bright ? "#f4f1d8" : "#3a4578");
+        }
+      }
+      if (lit > 0.3) {
+        rect(132, 5, 2, 2, "#dcd8bd");
+        rect(134, 8, 1, 1, "#dcd8bd");
+      }
+      // Moon on the water: a soft column of short glints under the moon, shimmering gently,
+      // and fainter as the moon thins. A new moon leaves the pond dark.
+      if (lit > 0.08) {
+        const widths = [4, 3, 5, 2, 3, 1];
+        widths.forEach((w, i) => {
+          const y = POND.y - 6 + i * 2;
+          const x = Math.round(129 - w / 2 + (reduced ? 0 : Math.sin(t * 1.3 + i * 1.7) * 0.8));
+          if (!inPondPoint(x, y) || !inPondPoint(x + w - 1, y)) return;
+          c.globalAlpha = (0.5 - i * 0.06) * (0.35 + 0.65 * lit);
+          rect(x, y, w, 1, "#f4f1d8");
+        });
+        c.globalAlpha = 1;
+      }
     }
     if (!grade.glow) return;
     c.globalCompositeOperation = "lighter";
@@ -504,6 +543,13 @@ export class Ambient {
       c.globalAlpha = 1;
     };
     if (glowSource) glow(glowSource.x, glowSource.y, 16, "#ff9a3c", grade.glow * (0.85 + Math.sin(t * 9) * 0.08));
+    // Fixed lights in the garden, like a lantern earned together: a warm pool plus a bright core.
+    for (const light of lights) {
+      glow(light.x, light.y, light.r || 10, light.color || "#ffb347", grade.glow * (light.strength ?? 0.8) * (0.9 + Math.sin(t * 5 + light.x) * 0.06));
+      c.globalAlpha = 0.85 * grade.glow;
+      rect(light.x - 1, light.y - 2, 3, 4, "#fff1a6");
+      c.globalAlpha = 1;
+    }
     // Summer nights are firefly season; spring and autumn get a few, winter none.
     const fireflies = this.weather === "rain" ? 0 : this.season === "summer" ? this.fireflies.length : this.season === "winter" ? 0 : 3;
     if (phase === "night" || phase === "dusk")

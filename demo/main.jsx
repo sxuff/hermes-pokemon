@@ -77,6 +77,7 @@ document.querySelectorAll("[data-event]").forEach((button) =>
       "tool-web": "Simulated: Hermes is searching the web. Reactions are spaced about 20 s apart.",
       "tool-terminal": "Simulated: Hermes is running a command. Reactions are spaced about 20 s apart.",
       "tool-files": "Simulated: Hermes is writing files. Reactions are spaced about 20 s apart.",
+      elsewhere: "Simulated: a turn finished in a chat you are not looking at. Glances are spaced about 30 s apart.",
     }[button.dataset.event];
   }),
 );
@@ -126,6 +127,22 @@ document.querySelector("#visitor").addEventListener("click", () => {
   document.querySelector("#event-label").textContent = ok
     ? `Simulated: a wild ${runtime.visitor.species[0].toUpperCase() + runtime.visitor.species.slice(1)} stops by.`
     : "No visitor right now: it may be raining, winter daytime, extra quiet mode, or someone is already here.";
+});
+// Simulated: you met 100 days ago and are back after a short break. Day 30 is recorded quietly,
+// day 100 is celebrated, and both leave something in the garden.
+document.querySelector("#milestone").addEventListener("click", () => {
+  const record = storage.get("companion", null);
+  if (!record?.species) {
+    document.querySelector("#event-label").textContent = "Choose your companion first, then try a simulated milestone.";
+    return;
+  }
+  dispose();
+  const memories = record.memories || {}, now = Date.now();
+  storage.set("companion", { ...record, memories: { ...memories,
+    [record.species]: { ...memories[record.species], metAt: now - 100 * 86_400_000, milestones: [], lastSeenAt: now - 120_000, lastGreetingAt: now - 3_600_000 },
+  } });
+  document.querySelector("#event-label").textContent = "Simulated: day 100 together. The bench and the lantern are yours to keep.";
+  enable();
 });
 function simulateGrowth(evolution) {
   const label = document.querySelector("#growth-label");

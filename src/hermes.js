@@ -11,6 +11,9 @@ export function createHermesBridge(host, ctx, { now = Date.now } = {}) {
   // What kind of tool Hermes just started: { kind: "web"|"terminal"|"files", sequence }.
   // Separate from `activity` so tool bursts never disturb the working/waiting state.
   const tool = signal({ kind: null, sequence: 0 });
+  // A turn finished successfully in a session you are not looking at: { sequence, session }.
+  // Separate from `activity`, which only ever describes the focused session.
+  const elsewhere = signal({ session: null, sequence: 0 });
   const visible = signal(true);
   const disposers = [];
   let disposed = false,
@@ -79,7 +82,14 @@ export function createHermesBridge(host, ctx, { now = Date.now } = {}) {
   }
   function event(e) {
     const id = read(focusAtom);
-    if (!id || e.replayed || e.session_id !== id) return;
+    if (e.replayed) return;
+    if (e.session_id !== id) {
+      // Another chat finished a turn: worth a glance, never a cheer or a state change.
+      if (e.type === "message.complete" && typeof e.session_id === "string" && e.payload?.status === "complete" && !e.payload?.error && !disposed)
+        elsewhere.set({ session: e.session_id, sequence: elsewhere.get().sequence + 1 });
+      return;
+    }
+    if (!id) return;
     const profile = read(state.focusedSessionProfile);
     if (e.profile && profile && e.profile !== profile) return;
     if (e.type === "message.complete") complete(e.payload);
@@ -114,8 +124,9 @@ export function createHermesBridge(host, ctx, { now = Date.now } = {}) {
     disposers.splice(0).forEach((fn) => fn?.());
     activity.clear();
     tool.clear();
+    elsewhere.clear();
     visible.clear();
   };
   ctx.onDispose(dispose);
-  return { activity, tool, visible, dispose, now };
+  return { activity, tool, elsewhere, visible, dispose, now };
 }

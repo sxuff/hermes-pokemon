@@ -31,3 +31,16 @@ export function milestoneName(days) {
   if (days >= 365 && days % 365 === 0) return days === 365 ? "One year together" : `${days / 365} years together`;
   return `${days} days together`;
 }
+
+// Milestones leave something permanent in the garden: a bench at day 30, a paper lantern at day
+// 100 that glows after dark, and bunting on the fence from the first anniversary. Earned from
+// the milestone list already saved, so nothing new is stored and nothing is ever lost.
+export const REWARDS = {
+  bench: { label: "A garden bench", days: 30, x: 104, y: 43 },
+  lantern: { label: "A paper lantern", days: 100, x: 65, y: 43 },
+  bunting: { label: "Anniversary bunting", days: 365 },
+};
+export function rewardsFor(milestones) {
+  const reached = Array.isArray(milestones) ? milestones.filter((d) => Number.isInteger(d) && d > 0) : [];
+  return Object.keys(REWARDS).filter((id) => reached.some((d) => d >= REWARDS[id].days));
+}

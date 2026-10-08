@@ -61,3 +61,47 @@ test("initial narrow mounting snaps into view, then ordinary camera following st
     assert.deepEqual(f.renderer.toWorld(1, 1), { x: 160, y: 120 });
   } finally { f.restore(); }
 });
+
+// A context that remembers the last color painted on each garden pixel.
+function paintingFixture(form, lineage) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const pixels = new Map();
+  const capture = () => new Proxy({ globalAlpha: 1, globalCompositeOperation: "source-over", fillStyle: "", fillRect(x, y, w, h) {
+    for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) pixels.set(`${x + i},${y + j}`, this.fillStyle);
+  } }, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+  const offscreen = () => new Proxy({ globalAlpha: 1 }, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+  Object.defineProperty(globalThis, "document", { configurable: true, writable: true, value: { createElement: () => ({ width: 160, height: 120, getContext: offscreen }) } });
+  const sprites = Object.fromEntries(Object.entries(assets[form]).map(([name, data]) => [name, { ...data, image: {} }]));
+  const main = capture();
+  return {
+    pixels,
+    renderer: createRenderer({ width: 160, height: 120, getContext: () => main }, sprites, lineage, form),
+    at: (x, y) => pixels.get(`${x},${y}`),
+    restore() {
+      if (previous) Object.defineProperty(globalThis, "document", previous);
+      else delete globalThis.document;
+    },
+  };
+}
+
+test("milestone rewards stand against the fence and the lantern glows only after dark", () => {
+  const f = paintingFixture("bulbasaur", "bulbasaur");
+  try {
+    const pet = new Companion("bulbasaur");
+    f.renderer.resize(370, 1);
+    f.renderer.draw(pet, "day", false, "summer", { rewards: [] });
+    const bare = [...f.pixels].filter(([, color]) => color === "#c9473f" || color === "#e2bd8a").length;
+    assert.equal(bare, 0, "nothing earned, nothing drawn");
+    f.pixels.clear();
+    f.renderer.draw(pet, "day", false, "summer", { rewards: ["bench", "lantern", "bunting"] });
+    const painted = [...f.pixels].filter(([, color]) => ["#c9473f", "#e2bd8a", "#fbe9b0"].includes(color)).map(([key]) => key.split(",").map(Number));
+    assert.ok(painted.length > 20, "bench and lantern are drawn");
+    assert.ok(painted.every(([, y]) => y <= 43), "all of it behind the walkable grass");
+    assert.ok([...f.pixels].some(([key, color]) => color === "#f19ab4" && Number(key.split(",")[1]) === 27), "bunting hangs from the rail");
+    assert.equal([...f.pixels].filter(([, color]) => color === "#ffb347").length, 0, "no glow by day");
+    f.pixels.clear();
+    f.renderer.draw(pet, "night", false, "summer", { rewards: ["lantern"] });
+    assert.ok([...f.pixels].some(([, color]) => color === "#ffb347"), "the lantern glows at night");
+    assert.ok([...f.pixels].some(([, color]) => color === "#f4f1d8"), "and the moon is up");
+  } finally { f.restore(); }
+});

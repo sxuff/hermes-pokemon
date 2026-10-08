@@ -1,5 +1,15 @@
 # Verification
 
+## 0.7.0 (2026-10-08)
+
+Four features and one engineering change, all local and read-only.
+- **Other chats:** the bridge emits a separate `elsewhere` signal for a successful `message.complete` from a non-focused session. Unit tests cover: focused state untouched, errors/stops/replays/unknown sessions ignored, the focused session's own finish still cheers. The companion's glance turns toward the session list with a "!", holds a 30-second cooldown, never interrupts fetch, shows only the bubble in extra quiet mode, and returns to keeping company afterwards.
+- **Milestone rewards:** `rewardsFor` derives bench/lantern/bunting from the saved milestone list (a quietly recorded day 30 still earns its bench); the companion's visits keep it on walkable ground and seated in front of the item; the renderer draws everything behind the walkable grass and lights the lantern only after dark. Browser: **Simulate day 100** records `[30, 100]`, lists "A garden bench · A paper lantern" in Settings, and reaches `lanternlit` with the pinned night sky (`docs/images/rewards-night.png`).
+- **Day length and moon:** `phaseForHour(hour, season)` keeps the previous hours as the default and moves dawn/dusk by season; every season walks dawn → day → dusk → night in order. `moonPhase` reproduces the 2000-01-06 reference new moon and the 2000-01-21 full moon within a day; a pixel test checks new (no disk), full (whole disk), first quarter (right half), last quarter (left half), the Southern mirror, and a dark pond at new moon.
+- **Keyboard access:** `keyboardAction` is unit-tested for arrows, wrap-around, Home/End, Enter/Space, Escape and unknown keys; every target lands where a click would. Browser: focusing the canvas, Home announces "Your companion", ArrowRight announces "The old tree", Enter reaches `investigating`, Escape clears the announcement (`docs/images/keyboard-focus.png`).
+- `npm test`: **198 passed, 0 failed** (189 + 9 new). `npm run check:browser`: all 7 scripts pass in headless Chromium 1.64.0 (smoke 2.8 s, growth 42 s, xp 67 s, play 49 s, lifecycle 8.5 s, rhythm 41 s, world 47 s), no page errors. The same command now runs in CI on every push.
+- Noted while starting: one `npm test` run on main failed two runtime tests with "The bundled sprites could not be loaded" and then passed on every rerun; not reproduced since.
+
 ## 0.6.2 (2026-10-06)
 
 Native user report: a line above the fence and across the tree, and three odd bars on the pond, at night.

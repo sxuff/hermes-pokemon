@@ -6,6 +6,8 @@ import { SPECIES } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
 import { DECOR_SLOTS } from "./keepsakes.js";
 import { VISITORS } from "./visitors.js";
+import { REWARDS } from "./milestones.js";
+import { TARGETS } from "./keyboard.js";
 
 const ZZ = ["1111", "0010", "0100", "1111"];
 const ZZ_SMALL = ["111", "001", "010", "111"];
@@ -82,6 +84,19 @@ const DECOR = {
   seed: [[".d", "dl"], { d: "#4a3b2c", l: "#d8c9a0" }],
   snowdrop: [[".w.", "www", ".g."], { w: "#ffffff", g: "#4f9a52" }],
 };
+
+// What milestones leave behind, standing against the fence behind the walkable grass.
+const BENCH = [
+  ["wwwwwwwwwwww", "w.ww.ww.ww.w", "wwwwwwwwwwww", "ssssssssssss", "dddddddddddd", "ll........ll", "ll........ll"],
+  { w: "#c79a68", s: "#e2bd8a", d: "#9b7149", l: "#6b4b31" },
+];
+const LANTERN = [
+  ["ppppppp.", "pp..LLL.", "pp..LgL.", "pp..LgL.", "pp..LgL.", "pp..LLL.", "pp......", "pp......", "pp......", "pp......", "pp......"],
+  { p: "#6b4b31", L: "#c9473f", g: "#fbe9b0" },
+];
+const BUNTING_COLORS = [P.pink, P.yellow, P.white, P.violet];
+// The lantern's light, in garden coordinates, for the night-time glow pass.
+export const LANTERN_LIGHT = { x: REWARDS.lantern.x, y: 36, r: 11, color: "#ffb347", strength: 0.8 };
 
 export function createRenderer(canvas, sprites, species, form = species, visitorSprites = {}) {
   const c = canvas.getContext("2d");
@@ -170,6 +185,52 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
       drawPixels(c, rows, x, y, colors);
     });
   }
+  // Milestone rewards: outlined like keepsakes so they read as objects against the fence.
+  function drawOutlined(rows, colors, x, y) {
+    c.fillStyle = "#2c3a33";
+    rows.forEach((row, iy) => [...row].forEach((ch, ix) => {
+      if (colors[ch]) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) c.fillRect(x + ix + dx, y + iy + dy, 1, 1);
+    }));
+    drawPixels(c, rows, x, y, colors);
+  }
+  function drawRewards(rewards, time, reduced) {
+    if (rewards.includes("bench")) {
+      const [rows, colors] = BENCH, { x, y } = REWARDS.bench;
+      drawOutlined(rows, colors, Math.round(x - rows[0].length / 2), y - rows.length + 1);
+    }
+    if (rewards.includes("lantern")) {
+      const [rows, colors] = LANTERN, { x, y } = REWARDS.lantern;
+      drawOutlined(rows, colors, x - 5, y - rows.length + 1);
+    }
+    if (rewards.includes("bunting")) {
+      // Little flags hung from the fence's top rail, fluttering one pixel now and then.
+      for (let i = 0; i < 14; i++) {
+        const x = 68 + i * 6, color = BUNTING_COLORS[i % BUNTING_COLORS.length];
+        const flutter = !reduced && Math.sin(time * 3 + i * 1.3) > 0.3 ? 1 : 0;
+        c.fillStyle = "#2c3a33";
+        c.fillRect(x - 1, 27, 5, 1);
+        c.fillStyle = color;
+        c.fillRect(x, 27, 3, 1);
+        c.fillRect(x + 1 + flutter, 28, 1, 1);
+      }
+    }
+  }
+  // Keyboard focus ring: a dashed pixel ellipse around the focused target, marching slowly.
+  function drawFocus(index, pet, reduced) {
+    const target = TARGETS[index];
+    if (!target) return;
+    const cx = target.point ? target.point.x : pet.x, cy = target.point ? target.point.y : pet.y - 9;
+    const offset = reduced ? 0 : Math.floor(pet.time * 4) % 2;
+    for (let a = 0; a < 48; a++) {
+      if ((a + offset) % 2) continue;
+      const ang = (a / 48) * Math.PI * 2;
+      const x = Math.round(cx + Math.cos(ang) * target.rx), y = Math.round(cy + Math.sin(ang) * target.ry);
+      c.fillStyle = "#2c3a33";
+      c.fillRect(x - 1, y - 1, 3, 3);
+      c.fillStyle = "#fffdf3";
+      c.fillRect(x, y, 1, 1);
+    }
+  }
   function drawVisitor(v, reduced) {
     const sheets = visitorSprites[v.species];
     if (!sheets) return;
@@ -205,6 +266,8 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     c.drawImage(background, 0, 0);
     c.drawImage(ground, 0, 0);
     ambient.drawBack(c, phase, reduced);
+    const rewards = Array.isArray(extras.rewards) ? extras.rewards : [];
+    if (rewards.length) drawRewards(rewards, pet.time, reduced);
     // Depth-sort everything that stands on the ground.
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
     if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
@@ -235,7 +298,8 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
       c.globalCompositeOperation = "source-over";
     }
     const flame = sp.glow && !pet.swimming ? { x: pet.x + [-5, -6, -7, -3, 5, 6, 7, 3][pet.dir], y: pet.y - 10 } : null;
-    ambient.drawLights(c, phase, flame, reduced);
+    ambient.drawLights(c, phase, flame, reduced, rewards.includes("lantern") ? [LANTERN_LIGHT] : []);
+    if (extras.focus !== null && extras.focus !== undefined) drawFocus(extras.focus, pet, reduced);
     const bodyHeight = animMeta[pet.form || form].visualHeight || 22;
     if (pet.bubble) drawBubble(c, pet.bubble, pet.x, pet.y - Math.max(pet.swimming ? 20 : 26, bodyHeight + 4) - bubbleLift, pet.time, reduced);
     if ((pet.drowsy ?? pet.asleep) && !reduced) {
@@ -270,6 +334,10 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     },
     tick(dt, phase, reduced, nextSeason = season, weather = "clear") {
       ambient.tick(dt, phase, reduced, nextSeason, weather);
+    },
+    // Tonight's moon phase (0 new, 0.5 full) and whether the lit side is mirrored.
+    setMoon(phase, flip = false) {
+      if (Number.isFinite(phase)) ambient.moon = { phase: ((phase % 1) + 1) % 1, flip: Boolean(flip) };
     },
     get season() {
       return season;

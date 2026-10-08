@@ -6,7 +6,7 @@ import { SEASONS } from "./seasons.js";
 import { DECOR_SLOTS, MAX_PLACED } from "./keepsakes.js";
 import { TOOL_KINDS, TOOL_COOLDOWN } from "./tools.js";
 import { VISITORS } from "./visitors.js";
-import { milestoneName } from "./milestones.js";
+import { milestoneName, REWARDS } from "./milestones.js";
 
 // Pure pet logic: no DOM, no drawing. A Companion is a small explicit state machine whose
 // states are driven by short plans (walk → turn → act). Interrupts replace the plan.
@@ -20,6 +20,8 @@ export const COMPANY_SPOT = { x: HOME.x + 12, y: HOME.y - 6 };
 // Consecutive failed turns before it suggests a small break, and how rarely it may.
 export const BREAK_STREAK = 2;
 export const BREAK_COOLDOWN = 600;
+// Simulation seconds between glances at other chats: several sessions can finish at once.
+export const ELSEWHERE_COOLDOWN = 30;
 const onPlace = (p) => !p ? null : onTree(p) ? "tree" : inPond(p) ? "pond" :
   Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10 ? "flowers" : null;
 export const CAPTIONS = {
@@ -73,6 +75,9 @@ export const CAPTIONS = {
   visitor: "Watching a wild visitor",
   admiring: "Checking on a keepsake",
   milestone: "Another milestone together",
+  elsewhere: "Something finished in another chat",
+  bench: "Resting by the bench you earned together",
+  lanternlit: "Sitting in the lantern light",
 };
 const FETCH = new Set(["chasing", "returning", "presenting"]);
 
@@ -102,7 +107,11 @@ export class Companion {
     this.lateNight = false;
     this.placed = Array.isArray(options.placed) ? options.placed.filter((id) => this.keepsakes.has(id)).slice(0, MAX_PLACED) : [];
     this.nextToolAt = 0;
+    this.nextElsewhereAt = 0;
     this.pendingMilestone = null;
+    // What milestones have left in the garden, and the time of day (the lantern is for after dark).
+    this.rewards = [];
+    this.phase = "day";
     this.reset();
     if (this.favoriteSpot) Object.assign(this, SPOTS[this.favoriteSpot]);
     const position = options.position;
@@ -258,11 +267,15 @@ export class Companion {
     let plan;
     // Rain, late hours and keepsakes set out in the garden add their own small habits.
     // The extra draw happens only when one applies, so ordinary days are unchanged.
-    if (!this.reduced && (this.weather === "rain" || this.lateNight || this.placed.length)) {
+    if (!this.reduced && (this.weather === "rain" || this.lateNight || this.placed.length || this.rewards.length)) {
       const q = this.random();
       if (this.weather === "rain" && q < 0.35) plan = this.rainPlan();
       else if (this.lateNight && q < 0.6) plan = q < 0.3 ? this.sleepyPlan() : this.napPlan(true);
       else if (this.placed.length && q > 0.88) plan = this.decorPlan();
+      else if (this.rewards.length && q > 0.76 && q <= 0.88) {
+        const visit = this.rewardPlan();
+        if (visit.length) plan = visit;
+      }
     }
     const r = this.random();
     if (plan) {
@@ -510,6 +523,26 @@ export class Companion {
       { kind: "turn", dir: 0 },
     ];
   }
+  // Spend a moment with something a milestone left behind: the bench by day, the lantern once
+  // it is lit. Bunting is only for looking at.
+  rewardPlan() {
+    const lantern = this.rewards.includes("lantern") && ["dusk", "night"].includes(this.phase);
+    const bench = this.rewards.includes("bench");
+    const id = lantern && (!bench || this.random() < 0.6) ? "lantern" : bench ? "bench" : null;
+    if (!id) return [];
+    const spot = REWARDS[id];
+    const to = nearestWalkable({ x: spot.x, y: spot.y + 5 });
+    const state = id === "lantern" ? "lanternlit" : "bench";
+    return [
+      { kind: "walk", to, state: "walking" },
+      { kind: "turn", dir: id === "lantern" ? 4 : 0, state },
+      ...(id === "lantern" ? [{ kind: "pose", anim: "LookUp", duration: 2.2, state }, { kind: "turn", dir: 0, state }] : []),
+      { kind: "pose", anim: "Sit", duration: 5 + this.random() * 4, state },
+      { kind: "pose", anim: "Nod", once: true, rate: 0.7, state },
+      { kind: "pose", anim: "Sit", duration: 2 + this.random() * 2, state },
+      { kind: "turn", dir: 0 },
+    ];
+  }
   napPlan(travel) {
     const spot = SPOTS[this.favoriteSpot || SPECIES[this.species].napSpot];
     return [
@@ -637,7 +670,7 @@ export class Companion {
     if (this.companyActive || this.companyPending) return false;
     this.companyPending = true;
     if (this.step?.kind === "pose" && ["idle", "attentive", "walking", "resting", "basking", "watching", "sniffing", "playing",
-        "scouting", "curious", "digging", "visitor", "admiring", "soaking", "sleepy", "puddling", "sheltering"].includes(this.state) && !this.inviting)
+        "scouting", "curious", "digging", "visitor", "admiring", "soaking", "sleepy", "puddling", "sheltering", "elsewhere", "bench", "lanternlit"].includes(this.state) && !this.inviting)
       this.keepCompany();
     return true;
   }
@@ -706,6 +739,30 @@ export class Companion {
     }
     plan.push({ kind: "turn", dir: 0, state }, { kind: "pose", anim: "Idle", duration: 0.8, state: stay ? "company" : "idle" });
     this.start(plan);
+    return true;
+  }
+  // A turn finished in a chat you are not looking at: a glance toward the session list and a
+  // small "!" so a tiled or background session's finish is noticeable without a notification.
+  noticeElsewhere() {
+    if (this.time < this.nextElsewhereAt) return false;
+    if (this.busy || this.swimming || this.asleep || this.inviting || this.greetingActive || this.pendingGreeting ||
+        ["petting", "waking", "eating", "investigating", "dozing", "treasure", "milestone", "offering", "proud", "celebrating", "steady", "stopped", "elsewhere"].includes(this.state))
+      return false;
+    this.nextElsewhereAt = this.time + ELSEWHERE_COOLDOWN;
+    this.say("!", 1.4);
+    const stay = this.companyActive;
+    const state = "elsewhere", after = { kind: "pose", anim: "Idle", duration: 0.6, state: stay ? "company" : "idle" };
+    if (this.reduced) {
+      this.start([{ kind: "pose", anim: "Idle", duration: 1.6, state }, after]);
+      return true;
+    }
+    this.start([
+      { kind: "turn", dir: 6, fast: true, state },
+      { kind: "pose", anim: "Idle", duration: 1.6, state },
+      { kind: "pose", anim: "Nod", once: true, rate: 0.9, state },
+      { kind: "turn", dir: 0, state },
+      after,
+    ]);
     return true;
   }
   // A wild Pokémon stopped by: turn and watch it for a moment.

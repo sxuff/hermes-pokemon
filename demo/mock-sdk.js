@@ -49,6 +49,9 @@ export function simulate(kind) {
   } else if (kind === "failed") {
     busyBySession.set({});
     emit("message.complete", { status: "error" });
+  } else if (kind === "elsewhere") {
+    // Simulated: a turn finished in a session that is not focused.
+    emit("message.complete", { status: "complete" }, "demo-other-session");
   } else if (kind === "working") busyBySession.set({ [focusedSessionId.get()]: true });
   else if (kind === "completed") {
     busyBySession.set({});
