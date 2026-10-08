@@ -1,14 +1,17 @@
 import { loadSprites, createRenderer, drawSprite } from "./renderer.js";
-import { phaseForHour } from "./ambient.js";
+import { phaseForHour, moonPhase } from "./ambient.js";
 import { FORMS } from "./species.js";
 import { animMeta } from "./anim-meta.generated.js";
 import { resolveSeason } from "./seasons.js";
 import { LONG_TURN_MS } from "./hermes.js";
 import { resolveWeather, isLateNight } from "./weather.js";
 import { Visitors, VISITORS } from "./visitors.js";
+import { saplingStage } from "./milestones.js";
 
-async function loadVisitorSprites() {
-  const entries = await Promise.all(Object.keys(VISITORS).map(async (id) => [id, await loadSprites(id)]));
+async function loadVisitorSprites(cameos = []) {
+  // Wild visitors by species, cameos by the form your other starter has reached.
+  const sheets = [...Object.keys(VISITORS), ...cameos.map((c) => c?.form).filter((form) => typeof form === "string" && Object.hasOwn(FORMS, form))];
+  const entries = await Promise.all([...new Set(sheets)].map(async (id) => [id, await loadSprites(id)]));
   return Object.fromEntries(entries);
 }
 
@@ -16,7 +19,7 @@ const FPS = 30,
   REDUCED_FPS = 8;
 
 // Each mounted canvas owns one scheduler. Visibility changes cancel the pending frame.
-export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], days = () => 0, selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
   let disposed = false,
     ready = false,
@@ -30,14 +33,21 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     phase = "day",
     currentSeason = "summer",
     currentWeather = "clear",
+    currentSapling = 0,
     phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
+  // Starters you have raised before, fixed at mount so their sheets are loaded once.
+  const cameoList = pet ? (Array.isArray(cameos()) ? cameos() : []) : [];
+  visitors?.setCameos(cameoList);
   const disposers = [];
   const updatePhase = () => {
-    const setting = sky();
-    phase = setting === "auto" ? phaseForHour(new Date().getHours() + new Date().getMinutes() / 60) : setting;
-    const s = season();
+    const setting = sky(), s = season(), date = new Date();
     currentSeason = resolveSeason(s?.setting, s?.hemisphere);
+    // Day length follows the season, and the moon keeps its real phase.
+    phase = setting === "auto" ? phaseForHour(date.getHours() + date.getMinutes() / 60, currentSeason) : setting;
+    // The preview's golden-image checks pin the moon; Hermes never sets this.
+    const pinnedMoon = globalThis.__hermesPokemonDebug?.moon;
+    renderer?.setMoon(Number.isFinite(pinnedMoon) ? pinnedMoon : moonPhase(date), s?.hemisphere === "south");
     currentWeather = resolveWeather(weather(), currentSeason);
     if (pet) {
       pet.season = currentSeason;
@@ -45,6 +55,11 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
       pet.lateNight = isLateNight(new Date());
       const ids = placed();
       pet.placed = Array.isArray(ids) ? ids.filter((id) => pet.keepsakes.has(id)) : [];
+      const earned = rewards();
+      pet.rewards = Array.isArray(earned) ? earned.filter((id) => typeof id === "string") : [];
+      pet.phase = phase;
+      visitors?.setCameos(cameoList);
+      currentSapling = saplingStage(days());
     }
   };
   function stop() {
@@ -148,6 +163,8 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
   disposers.push(bridge.visible.subscribe(refresh));
   if (pet && bridge.tool?.subscribe)
     disposers.push(bridge.tool.subscribe(() => { if (active()) pet.reactToTool(bridge.tool.get().kind); }));
+  if (pet && bridge.elsewhere?.subscribe)
+    disposers.push(bridge.elsewhere.subscribe(() => { if (active()) pet.noticeElsewhere?.(); }));
   if (pet)
     disposers.push(
       bridge.activity.subscribe(() => {
@@ -157,13 +174,15 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
         else if (!["working", "waiting"].includes(now.kind)) pet.endCompany?.();
       }),
     );
-  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites() : {}])
+  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites(cameoList) : {}])
     .then(([sprites, visitorSprites]) => {
       if (disposed) return;
       if (pet) {
-        renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
+        // The preview can seed the garden's randomness for repeatable pictures; Hermes never does.
+        const seeded = globalThis.__hermesPokemonDebug?.random;
+        renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites, typeof seeded === "function" ? { random: seeded } : {});
         renderer.resize(canvas.getBoundingClientRect().width, Math.min(devicePixelRatio || 1, 3));
-        draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, visitor: visitors?.current });
+        draw = () => renderer.draw(pet, phase, reduced(), currentSeason, { weather: currentWeather, placed: pet.placed, rewards: pet.rewards, visitor: visitors?.current, focus: focus(), sapling: currentSapling });
       } else {
         // Starter-card preview: idle with an occasional nod, a happy hop when chosen.
         const c = canvas.getContext("2d");
@@ -242,6 +261,10 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     summonVisitor: (id) => visitors?.summon({ phase, season: currentSeason, weather: currentWeather }, id) ?? false,
     get visitor() {
       return visitors?.current ?? null;
+    },
+    // Preview/testing only: tonight's moon as the renderer has it.
+    get moon() {
+      return renderer?.ambient.moon ?? null;
     },
   };
 }

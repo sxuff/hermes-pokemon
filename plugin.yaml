@@ -1,5 +1,5 @@
 name: hermes-pokemon
-version: "0.6.2"
+version: "0.7.0"
 manifest_version: 1
 kind: standalone
 requires_hermes: ">=0.21.5"

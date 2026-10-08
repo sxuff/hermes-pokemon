@@ -60,7 +60,7 @@ test("flush batches meaningful moments per species and never persists simulation
   const h = harness(); h.controller.setPresent(true);
   h.events.push({ type: "interaction", kind: "ball" }, { type: "favorite", spot: "shade" }, { type: "interaction", kind: "pet" });
   h.controller.flush();
-  assert.deepEqual(h.store.getMemory("bulbasaur"), { favoriteSpot: "shade", lastInteraction: { kind: "pet", at: h.now }, lastSeenAt: h.now, lastGreetingAt: 0, keepsakes: [], arrivals: [[h.arrivalDay, h.arrivalMinute]], metAt: h.now, milestones: [], placed: [] });
+  assert.deepEqual(h.store.getMemory("bulbasaur"), { favoriteSpot: "shade", lastInteraction: { kind: "pet", at: h.now }, lastSeenAt: h.now, lastGreetingAt: 0, keepsakes: [], arrivals: [[h.arrivalDay, h.arrivalMinute]], metAt: h.now, milestones: [], placed: [], sightings: {} });
   assert.equal(h.store.getMemory("squirtle").lastInteraction, null);
   assert.equal(h.store.getProgression("bulbasaur").xp, 10);
   assert.equal(h.store.getProgression("squirtle").xp, 0);

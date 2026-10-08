@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Ambient } from "../src/ambient.js";
+import { Ambient, phaseForHour, moonPhase, moonIllumination, DAYLIGHT, PHASES } from "../src/ambient.js";
 import { SPOTS, POND } from "../src/world.js";
 
 const pet = { ...SPOTS.meadow };
@@ -103,4 +103,64 @@ test("switching to reduced motion releases temporary butterflies and pet referen
   assert.ok(ambient.butterflies.length <= 16, "play reactions cannot allocate unbounded butterflies");
   advance(ambient, 15, true);
   assert.ok(!ambient.butterflies.some((butterfly) => butterfly.orbit === pet), "temporary play butterflies release their pet reference even with motion off");
+});
+
+// ---- Day length and the moon ----------------------------------------------------------------
+test("day length follows the season while the old hours remain the default", () => {
+  assert.equal(phaseForHour(19.2), "dusk");
+  assert.equal(phaseForHour(19.2, "summer"), "day", "summer evenings are long");
+  assert.equal(phaseForHour(19.2, "winter"), "night", "winter nights come early");
+  assert.equal(phaseForHour(5.2, "summer"), "dawn");
+  assert.equal(phaseForHour(5.2, "winter"), "night");
+  assert.equal(phaseForHour(8.5, "winter"), "dawn");
+  for (const season of Object.keys(DAYLIGHT)) {
+    const { dawn, dusk } = DAYLIGHT[season];
+    assert.ok(dawn[0] < dawn[1] && dawn[1] < dusk[0] && dusk[0] < dusk[1] && dusk[1] <= 24, season);
+    let previous = "night";
+    for (let h = 0; h < 24; h += 0.25) {
+      const now = phaseForHour(h, season);
+      assert.ok(PHASES.includes(now));
+      if (now !== previous) assert.equal(PHASES[(PHASES.indexOf(previous) + 1) % 4], now, `${season} ${h}: ${previous} → ${now}`);
+      previous = now;
+    }
+  }
+});
+test("the moon keeps its real phase and a new moon leaves the pond dark", () => {
+  assert.ok(moonPhase(new Date(Date.UTC(2000, 0, 6, 18, 14))) < 0.01, "reference new moon");
+  const full = moonPhase(new Date(Date.UTC(2000, 0, 21, 4, 40)));
+  assert.ok(Math.abs(full - 0.5) < 0.02, `full moon ${full}`);
+  const later = moonPhase(new Date(Date.UTC(2026, 9, 8)));
+  assert.ok(later >= 0 && later < 1);
+  assert.equal(moonPhase(new Date(NaN)), 0.5, "an invalid date shows a full moon rather than failing");
+  assert.ok(moonIllumination(0) < 0.001 && Math.abs(moonIllumination(0.5) - 1) < 0.001 && Math.abs(moonIllumination(0.25) - 0.5) < 0.001);
+  const paint = () => {
+    const pixels = new Map();
+    const c = new Proxy({ globalAlpha: 1, globalCompositeOperation: "source-over", fillStyle: "", fillRect(x, y, w, h) {
+      for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) pixels.set(`${x + i},${y + j}`, this.fillStyle);
+    } }, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+    return { c, pixels };
+  };
+  const litPixels = (phase, flip = false) => {
+    const ambient = new Ambient(() => 0.4);
+    ambient.moon = { phase, flip };
+    const { c, pixels } = paint();
+    ambient.drawLights(c, "night", null, true);
+    const lit = [...pixels].filter(([key, color]) => color === "#f4f1d8" && key.split(",")[1] <= 11);
+    return lit.map(([key]) => Number(key.split(",")[0]));
+  };
+  assert.equal(litPixels(0).length, 0, "new moon: no lit disk");
+  assert.ok(litPixels(0.5).length >= 50, "full moon: the whole disk, minus two craters");
+  const waxing = litPixels(0.25), waning = litPixels(0.75);
+  assert.ok(waxing.length > 15 && waxing.length < 40 && waxing.every((x) => x >= 133), "first quarter lights the right half");
+  assert.ok(waning.every((x) => x <= 133), "last quarter lights the left half");
+  assert.ok(litPixels(0.25, true).every((x) => x <= 133), "southern skies see it mirrored");
+  const reflection = (phase) => {
+    const ambient = new Ambient(() => 0.4);
+    ambient.moon = { phase, flip: false };
+    const { c, pixels } = paint();
+    ambient.drawLights(c, "night", null, true);
+    return [...pixels].filter(([key, color]) => color === "#f4f1d8" && key.split(",")[1] > 40).length;
+  };
+  assert.equal(reflection(0), 0, "no moon, no reflection");
+  assert.ok(reflection(0.5) > 0);
 });

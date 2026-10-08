@@ -810,3 +810,66 @@
 .hp-place { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hp-line, rgba(0,0,0,.18)); background: transparent; color: inherit; cursor: pointer; }
 .hp-place[aria-pressed="true"] { background: var(--hp-accent-soft, rgba(95,154,79,.18)); }
 .hp-place:disabled { opacity: .45; cursor: default; }
+
+/* Keyboard access to the garden: a visible outline on the canvas, a ring drawn inside it, and
+   announcements for screen readers. */
+.hp-stage canvas:focus-visible {
+  outline: 2px solid var(--hp-accent);
+  outline-offset: -2px;
+}
+.hp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Status-bar presence: a tiny sprite and what the companion is doing, docked away or not. */
+.hp-statusbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.hp-statusbar canvas {
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+  flex: none;
+}
+.hp-statusbar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hp-statusbar strong {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* Level 50: a ribbon on the growth strip and the starter card. */
+.hp-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0 !important;
+  font-size: 11px;
+  color: var(--hp-accent);
+}
+.hp-card-level svg {
+  vertical-align: -2px;
+  margin-left: 3px;
+  color: var(--hp-accent);
+}

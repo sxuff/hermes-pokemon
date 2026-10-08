@@ -33,3 +33,26 @@ jobs:
       - run: npm run package
       - name: Check ZIP integrity with an independent reader
         run: python -c "import glob, zipfile; p = glob.glob('release/*.zip')[0]; z = zipfile.ZipFile(p); assert z.testzip() is None; assert len(z.namelist()) == 7; print('Verified', p)"
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Run the browser scripts against the built demo
+        run: npm run check:browser
+      - name: Keep failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-check
+          path: output/playwright/
+          if-no-files-found: ignore

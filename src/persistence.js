@@ -6,8 +6,9 @@ import { SEASON_SETTINGS, HEMISPHERES } from "./seasons.js";
 import { isKeepsake, KEEPSAKE_COUNT, MAX_PLACED } from "./keepsakes.js";
 import { validArrival, recordArrival, MAX_ARRIVALS } from "./rhythm.js";
 import { WEATHER_SETTINGS } from "./weather.js";
+import { VISITORS } from "./visitors.js";
 export const STORAGE_KEY = "companion";
-export const VERSION = 5;
+export const VERSION = 6;
 export const SKIES = ["auto", "dawn", "day", "dusk", "night"];
 export const DEFAULT_MEMORY = {
   favoriteSpot: null,
@@ -20,6 +21,8 @@ export const DEFAULT_MEMORY = {
   metAt: 0,
   milestones: [],
   placed: [],
+  // Wild visitors seen: { pidgey: { count, firstAt, lastAt } }. Cameos by your own starters are not logged.
+  sightings: {},
 };
 export const DEFAULT_RECORD = {
   version: VERSION,
@@ -55,7 +58,18 @@ export function validateMemory(raw) {
       : [],
     // Only keepsakes actually found can be set out in the garden.
     placed: Array.isArray(raw?.placed) ? [...new Set(raw.placed.filter((id) => keepsakes.includes(id)))].slice(0, MAX_PLACED) : [],
+    sightings: validateSightings(raw?.sightings),
   };
+}
+export function validateSightings(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const id of Object.keys(VISITORS)) {
+    const s = raw[id];
+    if (!s || typeof s !== "object" || !Number.isInteger(s.count) || s.count <= 0 || !timestamp(s.firstAt) || !timestamp(s.lastAt)) continue;
+    out[id] = { count: Math.min(s.count, 1_000_000), firstAt: s.firstAt, lastAt: Math.max(s.firstAt, s.lastAt) };
+  }
+  return out;
 }
 export function cleanName(value, species) {
   return (
@@ -70,7 +84,7 @@ export function cleanName(value, species) {
 }
 // Older saves gain memories in RAM. Write the migration only with a real change.
 export function validateRecord(raw) {
-  if (!raw || ![1, 2, 3, 4, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
+  if (!raw || ![1, 2, 3, 4, 5, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
   const species = knownSpecies(raw.species) ? raw.species : null;
   const memories = {};
   const progression = {};
@@ -155,6 +169,14 @@ export function createPersistence(storage) {
         ? memory.placed.filter((id) => id !== keepsake)
         : memory.placed.length < MAX_PLACED ? [...memory.placed, keepsake] : null;
       return placed ? this.remember(species, { placed }) : false;
+    },
+    // A wild visitor was watched: count it once per visit, keeping the first and latest time.
+    sighting(species, visitor, at = Date.now()) {
+      if (!knownSpecies(species) || !Object.hasOwn(VISITORS, visitor) || !timestamp(at)) return false;
+      const sightings = validateMemory(state.get().record.memories[species]).sightings;
+      const previous = sightings[visitor];
+      const next = previous ? { count: previous.count + 1, firstAt: previous.firstAt, lastAt: Math.max(previous.lastAt, at) } : { count: 1, firstAt: at, lastAt: at };
+      return this.remember(species, { sightings: { ...sightings, [visitor]: next } });
     },
     noteArrival(species, at) {
       if (!knownSpecies(species)) return false;

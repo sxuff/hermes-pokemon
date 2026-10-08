@@ -1,4 +1,18 @@
-Hermes Pokémon v0.6.2 makes the companion react to the rhythm of your Hermes work and brings the garden to life with seasons, weather and visitors, for Hermes Desktop 0.21.5+.
+Hermes Pokémon v0.7.0 lets the companion notice your other chats and live in the Hermes status bar and palette, lets milestones and the days themselves leave something permanent in the garden, brings old friends and in-character visitors, follows the real length of the day and the real moon, and makes the whole garden reachable from the keyboard, for Hermes Desktop 0.21.5+.
+
+**0.7.0:**
+
+- **Other chats**: a turn that finishes successfully in a session you are not looking at gets a glance toward the session list and a small “!”. Never a cheer, never for errors or stops, at least 30 seconds apart, bubble only in extra quiet mode.
+- **Milestone rewards**: day 30 leaves a garden bench by the fence, day 100 a paper lantern that glows after dark, and the first anniversary hangs bunting along the fence. Your companion rests by the bench by day and sits in the lantern light at night. Rewards are derived from the milestones already saved, so nothing new is stored and older saves get what they have earned.
+- **Day length and the moon**: dawn and dusk move with the season (long summer evenings, early winter dusks), and the moon shows its real phase, mirrored in the Southern Hemisphere. A new moon leaves the pond dark.
+- **Keyboard access**: Tab to the garden, arrow keys move a ring between the Pokémon, tree, pond, flowers and meadow, Enter acts, Escape clears, and a screen reader hears each choice.
+- **Status bar and palette**: a tiny sprite and caption in the status bar (click to bring the garden back), four palette commands with unbound, rebindable keybinds, and a tap on the companion while Hermes waits on a question puts the caret in the composer.
+- **Visitors in character**: each starter greets each wild visitor its own way, Settings keeps a sightings log, and a starter you raised before may drop in for a cameo that your companion walks over to greet.
+- **A sapling and the days away**: a sprout after the first week grows through five stages with the days together; a week or more away leaves a small leaf pile that your first interaction scatters.
+- **Polish**: hover cursors and hints, a snapshot PNG from Settings, and a ribbon at level 50.
+- **Browser checks in CI**: `npm run check:browser` runs the eight Playwright scripts against the built demo, including three golden-image scenes compared pixel for pixel; the workflow runs them on every push.
+- Saves move to version 6 (a sightings map per starter); everything else carries over unchanged. The demo adds **Other chat done**, **Old friend cameo**, **Simulate day 100**, **Simulate a week away**, a simulated status bar, palette and composer.
+
 
 **0.6.2:** fixes two night-time visual glitches: a hard dark line across the top of the tree and sky, and the pond's moon reflection and shimmer lining up into a stack of bars.
 
@@ -22,6 +36,6 @@ Install with `hermes plugins install sxuff/hermes-pokemon`, or extract the ZIP's
 
 The release includes a SHA256 file for the ZIP. Runtime uses bundled assets, the documented Desktop SDK and the plugin's own storage. It has no model calls, credentials, backend or runtime network requests.
 
-An independent fan project. Original code is MIT; bundled CHUNSOFT Pokémon sprites and SpriteCollab community contributions retain their respective rights and are excluded from that license. See [CREDITS.md](https://github.com/sxuff/hermes-pokemon/blob/v0.6.2/CREDITS.md). The NousResearch catalog PR remains a draft and is subject to maintainer review.
+An independent fan project. Original code is MIT; bundled CHUNSOFT Pokémon sprites and SpriteCollab community contributions retain their respective rights and are excluded from that license. See [CREDITS.md](https://github.com/sxuff/hermes-pokemon/blob/v0.7.0/CREDITS.md). The NousResearch catalog PR remains a draft and is subject to maintainer review.
 
-Executed checks and native-versus-demo limits are recorded in [docs/VERIFICATION.md](https://github.com/sxuff/hermes-pokemon/blob/v0.6.2/docs/VERIFICATION.md).
+Executed checks and native-versus-demo limits are recorded in [docs/VERIFICATION.md](https://github.com/sxuff/hermes-pokemon/blob/v0.7.0/docs/VERIFICATION.md).

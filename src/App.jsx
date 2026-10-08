@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { SPECIES, FORMS, formFor } from "./species.js";
 import { Companion } from "./behavior.js";
 import { mountCanvas } from "./runtime.js";
+import { loadSprites } from "./renderer.js";
 import { SKIES } from "./persistence.js";
 import { inPond, onTree, SPOTS } from "./world.js";
 import { createCompanionMemory } from "./companion-memory.js";
@@ -9,8 +10,11 @@ import { levelFromXp, evolutionLevel, canEvolve, XP_PER_LEVEL, LEVEL_MAX } from 
 import { SEASON_SETTINGS, SEASON_NAMES, resolveSeason } from "./seasons.js";
 import { KEEPSAKES, KEEPSAKE_COUNT, MAX_PLACED } from "./keepsakes.js";
 import { WEATHER_SETTINGS, resolveWeather } from "./weather.js";
-import { daysTogether, milestoneName } from "./milestones.js";
+import { daysTogether, milestoneName, rewardsFor, REWARDS, saplingStage, saplingLabel, untidyFor } from "./milestones.js";
 import { usualTimes } from "./rhythm.js";
+import { TARGETS, keyboardAction, announce, targetAt, hintFor, CURSORS } from "./keyboard.js";
+import { saveSnapshot } from "./snapshot.js";
+import { VISITORS } from "./visitors.js";
 
 function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve }) {
   const [confirming, setConfirming] = useState(false);
@@ -38,6 +42,7 @@ function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve 
       <span>{level === LEVEL_MAX ? "Max level" : `${progress.xp % XP_PER_LEVEL} / ${XP_PER_LEVEL} XP`}</span></div>
     <progress aria-label="Experience toward next level" max={XP_PER_LEVEL} value={level === LEVEL_MAX ? XP_PER_LEVEL : progress.xp % XP_PER_LEVEL} />
     {notice && <p className="hp-growth-notice" role="status">{notice}</p>}
+    {level === LEVEL_MAX && <p className="hp-ribbon"><Icon name="ribbon" size={14} /><span>Fully grown. A ribbon for the whole journey together.</span></p>}
     {eligible && !confirming && <button className="hp-evolve-offer" disabled={!ready || pet.evolving} onClick={() => setConfirming(true)}>
       {pet.evolving ? "Growing into something new…" : `Ready to evolve into ${next.name}`}<Icon name="arrow" size={14} />
     </button>}
@@ -62,6 +67,9 @@ const MOMENT_NAMES = { pet: "A little affection", ball: "A game of fetch", berry
 function MemoryNote({ memory, onPlace }) {
   const moment = memory.lastInteraction;
   const usual = usualTimes(memory.arrivals || []);
+  const rewards = rewardsFor(memory.milestones);
+  const seen = Object.entries(memory.sightings || {}).sort((a, b) => b[1].count - a[1].count);
+  const days = memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0;
   const clock = (m) => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, Math.floor(m / 60), m % 60));
   return <div className="hp-memories" aria-label="Little things remembered">
     <span className="hp-eyebrow">LITTLE THINGS REMEMBERED</span>
@@ -71,7 +79,12 @@ function MemoryNote({ memory, onPlace }) {
       </dd></div>
       <div><dt>Usually see you</dt><dd>{usual.length ? usual.map(clock).join(" · ") : "Still learning your rhythm"}</dd></div>
       <div><dt>Days together</dt><dd>{memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0}
-        {memory.milestones.length > 0 && <small> · {milestoneName(memory.milestones.at(-1))} celebrated</small>}</dd></div></dl>
+        {memory.milestones.length > 0 && <small> · {milestoneName(memory.milestones.at(-1))} celebrated</small>}</dd></div>
+      <div><dt>In the garden</dt><dd>{[...rewards.map((id) => REWARDS[id].label), saplingLabel(saplingStage(days))].filter(Boolean).join(" · ") || "A sprout after the first week, a bench on day 30, a lantern on day 100, bunting each anniversary"}</dd></div>
+      <div><dt>Visitors seen</dt><dd>{seen.length
+        ? seen.map(([id, s]) => `${VISITORS[id].name} ×${s.count}`).join(" · ")
+        : "None yet. Wild Pokémon stop by now and then"}
+        {seen.length > 0 && <small> · first {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(Math.min(...seen.map(([, s]) => s.firstAt)))}</small>}</dd></div></dl>
     <div className="hp-keepsakes" aria-label="Keepsakes found together">
       <span className="hp-label">Keepsakes <small>{memory.keepsakes.length} / {KEEPSAKE_COUNT}</small></span>
       {memory.keepsakes.length
@@ -120,6 +133,18 @@ export function Icon({ name, size = 18 }) {
     arrow: <path d="m9 5 7 7-7 7M4 12h12" />,
     close: <path d="m6 6 12 12M6 18 18 6" />,
     reset: <path d="M4 9a8 8 0 1 1 0 6M4 3v6h6" />,
+    camera: (
+      <>
+        <path d="M4 8h3l2-3h6l2 3h3v11H4Z" />
+        <circle cx="12" cy="13" r="3.5" />
+      </>
+    ),
+    ribbon: (
+      <>
+        <circle cx="12" cy="9" r="5" />
+        <path d="m9 13-2 8 5-3 5 3-2-8" />
+      </>
+    ),
   };
   return (
     <svg
@@ -223,7 +248,7 @@ function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
             <SpritePreview species={formFor(id, store.getProgression(id).stage)} ctx={ctx} bridge={bridge} reduced={reduced} selected={selected === id} />
             <strong>{s.name}</strong>
             <span className="hp-type">{s.type}</span>
-            {store.getProgression(id).xp > 0 && <small className="hp-card-level">Lv. {levelFromXp(store.getProgression(id).xp)}</small>}
+            {store.getProgression(id).xp > 0 && <small className="hp-card-level">Lv. {levelFromXp(store.getProgression(id).xp)}{levelFromXp(store.getProgression(id).xp) === LEVEL_MAX ? <Icon name="ribbon" size={11} /> : null}</small>}
           </button>
         ))}
       </div>
@@ -255,8 +280,9 @@ function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
     </form>
   );
 }
-function Settings({ record, store, onClose, onChange, pet }) {
+function Settings({ record, store, onClose, onChange, onSnapshot, pet }) {
   const [name, setName] = useState(record.nickname);
+  const [saved, setSaved] = useState("");
   const first = useRef();
   useEffect(() => first.current?.focus(), []);
   return (
@@ -300,7 +326,7 @@ function Settings({ record, store, onClose, onChange, pet }) {
             </button>
           ))}
         </div>
-        <small>Clock follows your local time — dawn, day, dusk and a starry night.</small>
+        <small>Clock follows your local time — dawn, day, dusk and a starry night. Days run long in summer and short in winter, and the moon keeps its real phase.</small>
       </div>
       <div className="hp-sky hp-season">
         <span className="hp-label">Garden season</span>
@@ -356,6 +382,11 @@ function Settings({ record, store, onClose, onChange, pet }) {
         Change starter
         <Icon name="arrow" size={15} />
       </button>
+      <button className="hp-setting-action" onClick={() => { const name = onSnapshot?.(); if (name) setSaved(name); }}>
+        <Icon name="camera" />
+        Save a snapshot
+      </button>
+      {saved && <p className="hp-fine" role="status">Saved {saved} to your downloads.</p>}
       <MemoryNote memory={store.getMemory(record.species)} onPlace={(id) => store.togglePlaced(record.species, id)} />
       <p className="hp-fine">
         Sprites: CHUNSOFT + SpriteCollab contributors.
@@ -374,6 +405,10 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     season = useRef({ setting: record.season, hemisphere: record.hemisphere }),
     weather = useRef(record.weather),
     placed = useRef([]),
+    rewards = useRef([]),
+    focusTarget = useRef(null),
+    cameos = useRef([]),
+    days = useRef(0),
     runtime = useRef(),
     settingsButton = useRef(),
     evolutionPosition = useRef();
@@ -382,6 +417,12 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   season.current = { setting: record.season, hemisphere: record.hemisphere };
   weather.current = record.weather;
   placed.current = store.getMemory(record.species).placed;
+  rewards.current = rewardsFor(store.getMemory(record.species).milestones);
+  days.current = store.getMemory(record.species).metAt ? daysTogether(store.getMemory(record.species).metAt, Date.now()) : 0;
+  // Starters you have met before may drop by for a cameo, at the form they have reached.
+  cameos.current = Object.keys(SPECIES)
+    .filter((lineage) => lineage !== record.species && store.getMemory(lineage).metAt > 0)
+    .map((lineage) => ({ lineage, form: formFor(lineage, store.getProgression(lineage).stage), name: SPECIES[lineage].name }));
   const progress = store.getProgression(record.species);
   const form = formFor(record.species, progress.stage);
   const pet = useMemo(() => new Companion(record.species, Math.random, {
@@ -390,13 +431,24 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     placed: store.getMemory(record.species).placed,
     season: resolveSeason(record.season, record.hemisphere),
     position: evolutionPosition.current?.species === record.species ? evolutionPosition.current : undefined,
+    // Away a week or more: a few leaves have gathered by the path, until the first interaction.
+    untidy: evolutionPosition.current?.species === record.species ? 0
+      : untidyFor(store.getMemory(record.species).lastSeenAt ? (Date.now() - store.getMemory(record.species).lastSeenAt) / 86_400_000 : 0),
   }), [record.species, form, store]);
   const memory = useRef();
   const snapshot = () => ({ caption: pet.caption, busy: pet.busy, fetching: pet.fetching, evolving: pet.evolving, canEvolve: pet.canEvolve });
   const [status, setStatus] = useState(snapshot);
+  // What the status bar and palette commands see while this garden is mounted.
+  const publish = () => ctx.live?.set({ pet, species: record.species, form, nickname: record.nickname, caption: pet.caption });
+  useEffect(() => {
+    publish();
+    return () => { if (ctx.live?.get()?.pet === pet) ctx.live.set(null); };
+  }, [pet, record.nickname, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
   const [settings, setSettings] = useState(false),
     [error, setError] = useState(""),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [focused, setFocused] = useState(null),
+    [hover, setHover] = useState(null);
   useEffect(() => {
     setReady(false);
     setError("");
@@ -416,10 +468,14 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       season: () => season.current,
       weather: () => weather.current,
       placed: () => placed.current,
+      rewards: () => rewards.current,
+      focus: () => focusTarget.current,
+      cameos: () => cameos.current,
+      days: () => days.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,
-      onStatus: () => setStatus(snapshot()),
+      onStatus: () => { setStatus(snapshot()); publish(); },
       onEvolutionComplete: (position) => {
         evolutionPosition.current = { ...position, species: record.species };
         store.evolve(record.species);
@@ -438,8 +494,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     return () => { if (debug?.pet === pet) delete debug.pet; };
   }, [pet]);
   // A new sky preference should show immediately, not at the next periodic check.
-  const placedKey = placed.current.join(",");
-  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey]);
+  const placedKey = placed.current.join(","), rewardsKey = rewards.current.join(","), sapling = saplingStage(days.current);
+  useEffect(() => runtime.current?.refresh(), [record.sky, record.season, record.hemisphere, record.weather, placedKey, rewardsKey, sapling]);
   const closeSettings = () => {
     setSettings(false);
     settingsButton.current?.focus();
@@ -449,21 +505,46 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     memory.current?.flush();
     setStatus(snapshot());
   };
-  function clickGarden(event) {
-    if (!ready || pet.evolving) return;
-    const box = canvas.current.getBoundingClientRect();
-    const p = runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
-    // The body sits above the feet; be generous so a quick click still pets.
-    const hit = FORMS[form];
-    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
-    if (Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14)) pet.pet();
-    else if (onTree(p)) { pet.investigate(p, "tree"); pet.emit("leaves", { x: p.x, y: p.y }); }
-    else if (inPond(p)) { pet.investigate(p, "pond"); pet.emit("splash", { x: p.x, y: p.y + 2 }); }
-    else if (Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10) pet.investigate(p, "flowers");
-    else if (p.y > 44) pet.callTo(p);
+  // One dispatch for clicks and keyboard activation: a point in the garden, and whether it is
+  // the companion itself.
+  function actAt(p, id) {
+    // While Hermes has a question, tapping the companion also puts the caret in the composer.
+    if (id === "companion" && pet.state === "waiting") bridge.focusComposer?.();
+    if (id === "companion") pet.pet();
+    else if (id === "tree") { pet.investigate(p, "tree"); pet.emit("leaves", { x: p.x, y: p.y }); }
+    else if (id === "pond") { pet.investigate(p, "pond"); pet.emit("splash", { x: p.x, y: p.y + 2 }); }
+    else if (id === "flowers") pet.investigate(p, "flowers");
+    else if (id === "grass") pet.callTo(p);
     else pet.notice(p);
     memory.current?.flush();
     setStatus(snapshot());
+  }
+  const pointAt = (event) => {
+    const box = canvas.current.getBoundingClientRect();
+    return runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
+  };
+  function clickGarden(event) {
+    if (!ready || pet.evolving) return;
+    const p = pointAt(event);
+    actAt(p, targetAt(p, pet, FORMS[form]));
+  }
+  // Hover: the cursor and the hint line say what a click here would do.
+  function hoverGarden(event) {
+    if (!ready) return;
+    const id = targetAt(pointAt(event), pet, FORMS[form]);
+    if (id !== hover) setHover(id);
+  }
+  // Keyboard: arrows move a focus ring between the companion and the scenery, Enter acts on it.
+  const setFocus = (index) => { focusTarget.current = index; setFocused(index); };
+  function keyGarden(event) {
+    const action = keyboardAction(event.key, focused);
+    if (!action) return;
+    event.preventDefault();
+    if (action.type === "clear") return setFocus(null);
+    if (action.type === "move") return setFocus(action.index);
+    if (!ready || pet.evolving) return;
+    const target = TARGETS[action.index];
+    actAt(target.point || { x: pet.x, y: pet.y }, target.id === "companion" ? "companion" : targetAt(target.point));
   }
   const s = SPECIES[record.species], currentForm = FORMS[form];
   return (
@@ -474,9 +555,17 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
             ref={canvas}
             width="640"
             height="480"
+            tabIndex={0}
+            style={{ cursor: CURSORS[hover] || "default" }}
             onClick={clickGarden}
-            aria-label={`${record.nickname}, a ${currentForm.name}, in a pixel-art garden. Click the Pokémon to pet it, the grass to call it over, or the tree, pond and flowers to explore together.`}
+            onMouseMove={hoverGarden}
+            onMouseLeave={() => setHover(null)}
+            onKeyDown={keyGarden}
+            onFocus={() => { if (focusTarget.current === null && canvas.current?.matches?.(":focus-visible")) setFocus(0); }}
+            onBlur={() => setFocus(null)}
+            aria-label={`${record.nickname}, a ${currentForm.name}, in a pixel-art garden. Click the Pokémon to pet it, the grass to call it over, or the tree, pond and flowers to explore together. With the garden focused, arrow keys choose the Pokémon, tree, pond, flowers or meadow, and Enter acts on the choice.`}
           />
+          <span className="hp-sr-only" aria-live="polite">{announce(focused)}</span>
           {!ready && (
             <div className="hp-loading" role="status">
               {error || "Opening the garden…"}
@@ -524,18 +613,50 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
           return accepted;
         }} />
         {settings ? (
-          <Settings record={record} store={store} pet={pet} onClose={closeSettings} onChange={onChange} />
+          <Settings record={record} store={store} pet={pet} onClose={closeSettings} onChange={onChange}
+            onSnapshot={() => saveSnapshot(canvas.current, { nickname: record.nickname, form: currentForm.name, days: days.current })} />
         ) : (
           <p className="hp-hint">
             <Icon name="leaf" size={14} />
             <span>
-              {s.detail} Tap the garden to explore with {record.nickname}.
+              {hover ? hintFor(hover, record.nickname) : `${s.detail} Tap the garden to explore with ${record.nickname}.`}
             </span>
           </p>
         )}
         {reduced && <p className="hp-fine hp-motion-note">Quiet motion is on</p>}
       </div>
     </div>
+  );
+}
+// Status-bar item: the companion's idle frame at 18px and what it is doing. Click to reveal the
+// pane. Renders nothing until a garden is mounted, so the bar stays clean before a starter is chosen.
+export function StatusItem({ live, bridge }) {
+  const state = useSignal(live);
+  const visible = useSignal(bridge.visible);
+  const ref = useRef();
+  const form = state?.form;
+  useEffect(() => {
+    if (!form || !ref.current) return;
+    let cancelled = false;
+    loadSprites(form).then((sprites) => {
+      const canvas = ref.current;
+      if (cancelled || !canvas) return;
+      const a = sprites.Idle, scale = Math.min(18 / a.height, 18 / a.width);
+      canvas.width = 18; canvas.height = 18;
+      const c = canvas.getContext("2d");
+      c.imageSmoothingEnabled = false;
+      const w = Math.round(a.width * scale), h = Math.round(a.height * scale);
+      c.drawImage(a.image, 0, 0, a.width, a.height, Math.floor((18 - w) / 2), 18 - h, w, h);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [form]);
+  if (!state) return null;
+  const caption = visible ? state.caption : "Resting while hidden";
+  return (
+    <button type="button" className="hp-statusbar" title={`${state.nickname}: ${caption}. Click to show the garden.`} aria-label={`${state.nickname}: ${caption}. Show the garden.`} onClick={() => bridge.revealPane?.()}>
+      <canvas ref={ref} aria-hidden="true" />
+      <span><strong>{state.nickname}</strong>{caption}</span>
+    </button>
   );
 }
 export function App({ store, ctx, bridge }) {
