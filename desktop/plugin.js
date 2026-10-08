@@ -3038,6 +3038,28 @@ function announce(index) {
   const target = TARGETS[index];
   return target ? `${target.label[0].toUpperCase()}${target.label.slice(1)}. Press Enter to ${target.hint}.` : "";
 }
+function targetAt(p, pet = null, hit = null) {
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+  if (pet && hit) {
+    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
+    if (Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14)) return "companion";
+  }
+  if (onTree(p)) return "tree";
+  if (inPond(p)) return "pond";
+  if (Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10) return "flowers";
+  if (p.y > 44) return "grass";
+  return null;
+}
+var CURSORS = { companion: "grab", tree: "pointer", pond: "pointer", flowers: "pointer", grass: "pointer" };
+function hintFor(id, nickname = "your companion") {
+  return {
+    companion: `Pet ${nickname}`,
+    tree: `Explore the old tree with ${nickname}`,
+    pond: `Explore the pond with ${nickname}`,
+    flowers: `Explore the flower bed with ${nickname}`,
+    grass: `Call ${nickname} over here`
+  }[id] || "";
+}
 
 // src/renderer.js
 var ZZ = ["1111", "0010", "0100", "1111"];
@@ -4136,6 +4158,55 @@ function createCompanionMemory({ store, species, pet, now = Date.now }) {
   };
 }
 
+// src/snapshot.js
+var BAND = 14;
+function renderSnapshot(source, { nickname = "", form = "", days = 0 } = {}, doc = globalThis.document) {
+  if (!source || !Number.isFinite(source.width) || !Number.isFinite(source.height) || source.width <= 0) return null;
+  const k = Math.max(1, Math.round(source.width / 160));
+  const canvas = doc.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = source.height + BAND * k;
+  const c = canvas.getContext("2d");
+  c.imageSmoothingEnabled = false;
+  c.drawImage(source, 0, 0);
+  c.fillStyle = "#2c3a33";
+  c.fillRect(0, source.height, canvas.width, BAND * k);
+  c.fillStyle = "#fffdf3";
+  c.font = `${6 * k}px monospace`;
+  c.textBaseline = "middle";
+  const label = [nickname || form, form && nickname ? form : null, days > 0 ? `day ${days}` : null].filter(Boolean).join(" \xB7 ");
+  c.fillText(label, 4 * k, source.height + BAND * k / 2);
+  return canvas;
+}
+function snapshotName(nickname, at = /* @__PURE__ */ new Date()) {
+  const safe = String(nickname || "garden").toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || "garden";
+  const stamp = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+  return `hermes-pokemon-${safe}-${stamp}.png`;
+}
+function saveSnapshot(source, info, doc = globalThis.document) {
+  const canvas = renderSnapshot(source, info, doc);
+  if (!canvas) return null;
+  const name = snapshotName(info?.nickname);
+  const finish = (url) => {
+    const a = doc.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.rel = "noopener";
+    doc.body.append(a);
+    a.click();
+    a.remove();
+  };
+  if (typeof canvas.toBlob === "function" && typeof URL?.createObjectURL === "function")
+    canvas.toBlob((blob2) => {
+      if (!blob2) return;
+      const url = URL.createObjectURL(blob2);
+      finish(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1e4);
+    }, "image/png");
+  else finish(canvas.toDataURL("image/png"));
+  return name;
+}
+
 // src/App.jsx
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve }) {
@@ -4171,6 +4242,10 @@ function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve 
     ] }),
     /* @__PURE__ */ jsx("progress", { "aria-label": "Experience toward next level", max: XP_PER_LEVEL, value: level === LEVEL_MAX ? XP_PER_LEVEL : progress.xp % XP_PER_LEVEL }),
     notice && /* @__PURE__ */ jsx("p", { className: "hp-growth-notice", role: "status", children: notice }),
+    level === LEVEL_MAX && /* @__PURE__ */ jsxs("p", { className: "hp-ribbon", children: [
+      /* @__PURE__ */ jsx(Icon, { name: "ribbon", size: 14 }),
+      /* @__PURE__ */ jsx("span", { children: "Fully grown. A ribbon for the whole journey together." })
+    ] }),
     eligible && !confirming && /* @__PURE__ */ jsxs("button", { className: "hp-evolve-offer", disabled: !ready || pet.evolving, onClick: () => setConfirming(true), children: [
       pet.evolving ? "Growing into something new\u2026" : `Ready to evolve into ${next.name}`,
       /* @__PURE__ */ jsx(Icon, { name: "arrow", size: 14 })
@@ -4317,7 +4392,15 @@ function Icon({ name, size = 18 }) {
     ] }),
     arrow: /* @__PURE__ */ jsx("path", { d: "m9 5 7 7-7 7M4 12h12" }),
     close: /* @__PURE__ */ jsx("path", { d: "m6 6 12 12M6 18 18 6" }),
-    reset: /* @__PURE__ */ jsx("path", { d: "M4 9a8 8 0 1 1 0 6M4 3v6h6" })
+    reset: /* @__PURE__ */ jsx("path", { d: "M4 9a8 8 0 1 1 0 6M4 3v6h6" }),
+    camera: /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsx("path", { d: "M4 8h3l2-3h6l2 3h3v11H4Z" }),
+      /* @__PURE__ */ jsx("circle", { cx: "12", cy: "13", r: "3.5" })
+    ] }),
+    ribbon: /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsx("circle", { cx: "12", cy: "9", r: "5" }),
+      /* @__PURE__ */ jsx("path", { d: "m9 13-2 8 5-3 5 3-2-8" })
+    ] })
   };
   return /* @__PURE__ */ jsx(
     "svg",
@@ -4419,7 +4502,8 @@ function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
               /* @__PURE__ */ jsx("span", { className: "hp-type", children: s.type }),
               store.getProgression(id).xp > 0 && /* @__PURE__ */ jsxs("small", { className: "hp-card-level", children: [
                 "Lv. ",
-                levelFromXp(store.getProgression(id).xp)
+                levelFromXp(store.getProgression(id).xp),
+                levelFromXp(store.getProgression(id).xp) === LEVEL_MAX ? /* @__PURE__ */ jsx(Icon, { name: "ribbon", size: 11 }) : null
               ] })
             ]
           },
@@ -4454,8 +4538,9 @@ function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
     }
   );
 }
-function Settings({ record, store, onClose, onChange, pet }) {
+function Settings({ record, store, onClose, onChange, onSnapshot, pet }) {
   const [name, setName] = useState(record.nickname);
+  const [saved, setSaved] = useState("");
   const first = useRef();
   useEffect(() => first.current?.focus(), []);
   return /* @__PURE__ */ jsxs(
@@ -4549,6 +4634,18 @@ function Settings({ record, store, onClose, onChange, pet }) {
           "Change starter",
           /* @__PURE__ */ jsx(Icon, { name: "arrow", size: 15 })
         ] }),
+        /* @__PURE__ */ jsxs("button", { className: "hp-setting-action", onClick: () => {
+          const name2 = onSnapshot?.();
+          if (name2) setSaved(name2);
+        }, children: [
+          /* @__PURE__ */ jsx(Icon, { name: "camera" }),
+          "Save a snapshot"
+        ] }),
+        saved && /* @__PURE__ */ jsxs("p", { className: "hp-fine", role: "status", children: [
+          "Saved ",
+          saved,
+          " to your downloads."
+        ] }),
         /* @__PURE__ */ jsx(MemoryNote, { memory: store.getMemory(record.species), onPlace: (id) => store.togglePlaced(record.species, id) }),
         /* @__PURE__ */ jsxs("p", { className: "hp-fine", children: [
           "Sprites: CHUNSOFT + SpriteCollab contributors.",
@@ -4594,7 +4691,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       if (ctx.live?.get()?.pet === pet) ctx.live.set(null);
     };
   }, [pet, record.nickname, ctx]);
-  const [settings, setSettings] = useState(false), [error, setError] = useState(""), [ready, setReady] = useState(false), [focused, setFocused] = useState(null);
+  const [settings, setSettings] = useState(false), [error, setError] = useState(""), [ready, setReady] = useState(false), [focused, setFocused] = useState(null), [hover, setHover] = useState(null);
   useEffect(() => {
     setReady(false);
     setError("");
@@ -4657,28 +4754,34 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     memory.current?.flush();
     setStatus(snapshot());
   };
-  function actAt(p, companion) {
-    if (companion && pet.state === "waiting") bridge.focusComposer?.();
-    if (companion) pet.pet();
-    else if (onTree(p)) {
+  function actAt(p, id) {
+    if (id === "companion" && pet.state === "waiting") bridge.focusComposer?.();
+    if (id === "companion") pet.pet();
+    else if (id === "tree") {
       pet.investigate(p, "tree");
       pet.emit("leaves", { x: p.x, y: p.y });
-    } else if (inPond(p)) {
+    } else if (id === "pond") {
       pet.investigate(p, "pond");
       pet.emit("splash", { x: p.x, y: p.y + 2 });
-    } else if (Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10) pet.investigate(p, "flowers");
-    else if (p.y > 44) pet.callTo(p);
+    } else if (id === "flowers") pet.investigate(p, "flowers");
+    else if (id === "grass") pet.callTo(p);
     else pet.notice(p);
     memory.current?.flush();
     setStatus(snapshot());
   }
+  const pointAt = (event) => {
+    const box = canvas.current.getBoundingClientRect();
+    return runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
+  };
   function clickGarden(event) {
     if (!ready || pet.evolving) return;
-    const box = canvas.current.getBoundingClientRect();
-    const p = runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
-    const hit = FORMS[form];
-    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
-    actAt(p, Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14));
+    const p = pointAt(event);
+    actAt(p, targetAt(p, pet, FORMS[form]));
+  }
+  function hoverGarden(event) {
+    if (!ready) return;
+    const id = targetAt(pointAt(event), pet, FORMS[form]);
+    if (id !== hover) setHover(id);
   }
   const setFocus = (index) => {
     focusTarget.current = index;
@@ -4692,7 +4795,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     if (action.type === "move") return setFocus(action.index);
     if (!ready || pet.evolving) return;
     const target = TARGETS[action.index];
-    actAt(target.point || { x: pet.x, y: pet.y }, target.id === "companion");
+    actAt(target.point || { x: pet.x, y: pet.y }, target.id === "companion" ? "companion" : targetAt(target.point));
   }
   const s = SPECIES[record.species], currentForm = FORMS[form];
   return /* @__PURE__ */ jsxs("div", { className: "hp-living", children: [
@@ -4704,7 +4807,10 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
           width: "640",
           height: "480",
           tabIndex: 0,
+          style: { cursor: CURSORS[hover] || "default" },
           onClick: clickGarden,
+          onMouseMove: hoverGarden,
+          onMouseLeave: () => setHover(null),
           onKeyDown: keyGarden,
           onFocus: () => {
             if (focusTarget.current === null && canvas.current?.matches?.(":focus-visible")) setFocus(0);
@@ -4755,14 +4861,19 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
         setStatus(snapshot());
         return accepted;
       } }),
-      settings ? /* @__PURE__ */ jsx(Settings, { record, store, pet, onClose: closeSettings, onChange }) : /* @__PURE__ */ jsxs("p", { className: "hp-hint", children: [
+      settings ? /* @__PURE__ */ jsx(
+        Settings,
+        {
+          record,
+          store,
+          pet,
+          onClose: closeSettings,
+          onChange,
+          onSnapshot: () => saveSnapshot(canvas.current, { nickname: record.nickname, form: currentForm.name, days: days.current })
+        }
+      ) : /* @__PURE__ */ jsxs("p", { className: "hp-hint", children: [
         /* @__PURE__ */ jsx(Icon, { name: "leaf", size: 14 }),
-        /* @__PURE__ */ jsxs("span", { children: [
-          s.detail,
-          " Tap the garden to explore with ",
-          record.nickname,
-          "."
-        ] })
+        /* @__PURE__ */ jsx("span", { children: hover ? hintFor(hover, record.nickname) : `${s.detail} Tap the garden to explore with ${record.nickname}.` })
       ] }),
       reduced && /* @__PURE__ */ jsx("p", { className: "hp-fine hp-motion-note", children: "Quiet motion is on" })
     ] })
@@ -4866,7 +4977,7 @@ function commandsFor(live, reveal) {
 }
 
 // src/styles.css
-var styles_default = '.hp-root {\n  --hp-bg: var(--ui-bg-editor, #f7f7ef);\n  --hp-surface: var(--ui-bg-elevated, #fffef7);\n  --hp-text: var(--ui-text-primary, #343d34);\n  --hp-muted: var(--ui-text-tertiary, #75816f);\n  --hp-line: var(--ui-stroke-secondary, #dfe3d5);\n  --hp-accent: var(--ui-accent, #547653);\n  height: 100%;\n  width: 100%;\n  min-width: 220px;\n  display: flex;\n  flex-direction: column;\n  background: var(--hp-bg);\n  color: var(--hp-text);\n  font:\n    13px/1.5 "Segoe UI",\n    system-ui,\n    sans-serif;\n  container-type: size;\n  isolation: isolate;\n  box-sizing: border-box;\n  text-align: left;\n}\n.hp-root * {\n  box-sizing: border-box;\n}\n.hp-root button,\n.hp-root input {\n  font: inherit;\n}\n.hp-root button {\n  cursor: pointer;\n}\n.hp-root button:disabled {\n  cursor: default;\n  opacity: 0.5;\n}\n.hp-root button:focus-visible,\n.hp-root input:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: 3px;\n}\n.hp-root button {\n  color: inherit;\n}\n.hp-root h2,\n.hp-root h3,\n.hp-root p {\n  margin: 0;\n}\n.hp-header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 14px 18px;\n  border-bottom: 1px solid var(--hp-line);\n  font-size: 12px;\n  flex-shrink: 0;\n  letter-spacing: -0.15px;\n}\n.hp-brand-icon {\n  display: grid;\n  place-items: center;\n  color: var(--hp-accent);\n}\n.hp-header strong {\n  font-weight: 600;\n}\n.hp-version {\n  margin-left: auto;\n  color: var(--hp-muted);\n  font: 10px monospace;\n  border: 1px solid var(--hp-line);\n  border-radius: 4px;\n  padding: 1px 5px;\n}\n.hp-scroll {\n  overflow: auto;\n  flex: 1;\n  min-height: 0;\n  scrollbar-width: thin;\n}\n.hp-footer {\n  display: flex;\n  justify-content: space-between;\n  gap: 8px;\n  padding: 12px 18px;\n  border-top: 1px solid var(--hp-line);\n  color: var(--hp-muted);\n  font-size: 10px;\n  flex-shrink: 0;\n}\n.hp-footer > span:first-child {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n.hp-footer > span:last-child {\n  font: 8px/15px monospace;\n  letter-spacing: 1px;\n}\n.hp-footer i,\n.hp-garden-label i {\n  display: inline-block;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-accent);\n}\n.hp-choice {\n  padding: 26px 18px 15px;\n}\n.hp-intro {\n  text-align: center;\n  margin-bottom: 24px;\n}\n.hp-eyebrow {\n  font: 9px/1.5 monospace;\n  letter-spacing: 1.7px;\n  color: var(--hp-muted);\n}\n.hp-intro h2 {\n  font:\n    500 27px/1.2 Georgia,\n    serif;\n  letter-spacing: -0.8px;\n  margin: 12px 0;\n}\n.hp-intro p {\n  color: var(--hp-muted);\n  font-size: 12px;\n  line-height: 1.65;\n}\n.hp-starters {\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));\n  gap: 7px;\n}\n.hp-card {\n  position: relative;\n  border: 1px solid var(--hp-line);\n  border-radius: 10px;\n  background: var(--hp-surface);\n  padding: 12px 4px 10px;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  min-width: 0;\n  transition:\n    border-color 0.15s,\n    background 0.15s;\n}\n.hp-card[aria-pressed="true"] {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 9%, var(--hp-surface));\n  box-shadow: 0 0 0 1px var(--hp-accent);\n}\n.hp-number {\n  align-self: flex-start;\n  color: var(--hp-muted);\n  font: 8px monospace;\n  margin-left: 6px;\n}\n.hp-choice-dot {\n  position: absolute;\n  right: 8px;\n  top: 12px;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-line);\n}\n.hp-card[aria-pressed="true"] .hp-choice-dot {\n  background: var(--hp-accent);\n}\n.hp-preview {\n  width: 100%;\n  height: 85px;\n  image-rendering: pixelated;\n}\n.hp-card strong {\n  font-size: 11px;\n  letter-spacing: -0.3px;\n}\n.hp-type {\n  font-size: 9px;\n  margin-top: 3px;\n  color: var(--hp-muted);\n}\n.hp-trait {\n  text-align: center;\n  font-size: 12px !important;\n  padding: 17px 0 21px;\n}\n.hp-trait span {\n  display: block;\n  font-size: 10px;\n  color: var(--hp-muted);\n  margin-top: 4px;\n}\n.hp-label {\n  display: flex;\n  justify-content: space-between;\n  font-size: 11px;\n  margin-bottom: 8px;\n}\n.hp-label span {\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-root input:not([type="checkbox"]) {\n  width: 100%;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  color: var(--hp-text);\n  padding: 10px 12px;\n  min-width: 0;\n}\n.hp-root input::placeholder {\n  color: var(--hp-muted);\n}\n.hp-primary {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 13px;\n  width: 100%;\n  border: 0;\n  border-radius: 7px;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  padding: 12px;\n  margin-top: 12px;\n  font-weight: 600 !important;\n  font-size: 12px !important;\n}\n.hp-primary:hover,\n.hp-small-primary:hover {\n  filter: brightness(1.08);\n}\n.hp-fine {\n  font-size: 9px !important;\n  line-height: 1.7;\n  color: var(--hp-muted);\n  text-align: center;\n  margin-top: 18px !important;\n}\n.hp-text-button {\n  background: none;\n  border: 0;\n  display: block;\n  margin: 13px auto 0;\n  font-size: 11px !important;\n  color: var(--hp-muted) !important;\n  text-decoration: underline;\n  text-underline-offset: 3px;\n}\n.hp-living {\n  padding: 18px;\n}\n.hp-garden-label {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  margin-bottom: 12px;\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-garden-label > span:first-child {\n  display: flex;\n  gap: 6px;\n  align-items: center;\n  font: 9px monospace;\n  letter-spacing: 1.1px;\n}\n.hp-garden-label > span:last-child {\n  font-family: Georgia, serif;\n  font-style: italic;\n  font-size: 12px;\n}\n.hp-stage {\n  width: 100%;\n  aspect-ratio: 4/3;\n  position: relative;\n  border-radius: 10px;\n  overflow: hidden;\n  border: 1px solid color-mix(in srgb, var(--hp-accent) 25%, transparent);\n  background: var(--hp-surface);\n}\n.hp-stage canvas {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  cursor: pointer;\n  color: var(--hp-text);\n}\n.hp-loading {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-items: center;\n  background: var(--hp-surface);\n  font-size: 12px;\n  padding: 20px;\n  text-align: center;\n}\n.hp-scene-foot {\n  display: flex;\n  justify-content: space-between;\n  padding-top: 8px;\n  font: 7px monospace;\n  letter-spacing: 1.25px;\n  color: var(--hp-muted);\n}\n.hp-companion-column {\n  padding-top: 23px;\n}\n.hp-card-level {\n  color: var(--hp-muted);\n  font: 9px monospace;\n  margin-top: 5px;\n}\n.hp-growth {\n  margin-top: 15px;\n  font-size: 10px;\n  color: var(--hp-muted);\n}\n.hp-growth-line {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: baseline;\n  justify-content: space-between;\n  gap: 4px 10px;\n  margin-bottom: 7px;\n}\n.hp-growth-line strong { color: var(--hp-text); margin-left: 5px; font-weight: 500; }\n.hp-growth progress {\n  display: block;\n  appearance: none;\n  width: 100%;\n  height: 5px;\n  border: none;\n  border-radius: 4px;\n  overflow: hidden;\n  background: var(--hp-line);\n  accent-color: var(--hp-accent);\n}\n.hp-growth progress::-webkit-progress-bar { background: var(--hp-line); }\n.hp-growth progress::-webkit-progress-value { background: var(--hp-accent); border-radius: 4px; }\n.hp-growth progress::-moz-progress-bar { background: var(--hp-accent); }\n.hp-growth-notice { margin-top: 8px !important; color: var(--hp-accent); }\n.hp-growth-help { margin-top: 9px; line-height: 1.65; }\n.hp-growth-help summary { cursor: pointer; width: fit-content; }\n.hp-growth-help p { margin-top: 7px !important; }\n.hp-evolve-offer {\n  margin-top: 10px;\n  width: 100%;\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  justify-content: space-between;\n  padding: 9px 10px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  text-align: left;\n  font-size: 11px !important;\n  color: var(--hp-accent) !important;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-evolution-choice {\n  margin-top: 10px;\n  padding: 12px;\n  border: 1px solid var(--hp-line);\n  border-radius: 9px;\n  background: var(--hp-surface);\n  line-height: 1.6;\n}\n.hp-evolution-choice .hp-preview { float: right; width: 76px; height: 76px; object-fit: contain; }\n.hp-evolution-choice p { color: var(--hp-text); margin-bottom: 8px !important; }\n.hp-evolution-choice small { display: block; font-size: 10px; }\n.hp-evolution-actions { clear: both; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }\n.hp-evolution-actions button { border: 1px solid var(--hp-line); border-radius: 6px; padding: 8px; font-size: 11px !important; background: var(--hp-surface); }\n.hp-evolution-actions .hp-small-primary { background: var(--hp-accent); }\n.hp-evolution-choice > small:last-child { margin-top: 8px; }\n.hp-name-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 12px;\n}\n.hp-name-row > div {\n  min-width: 0;\n}\n.hp-name-row h2 {\n  font:\n    500 27px/1.3 Georgia,\n    serif;\n  margin-top: 4px;\n  overflow-wrap: anywhere;\n  letter-spacing: -0.5px;\n}\n.hp-badge {\n  border: 1px solid var(--hp-line);\n  padding: 4px 9px;\n  border-radius: 20px;\n  font-size: 10px;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-status {\n  font-size: 12px;\n  color: var(--hp-muted);\n  margin-top: 5px !important;\n  min-height: 36px;\n}\n.hp-controls {\n  display: flex;\n  gap: 8px;\n  margin-top: 12px;\n}\n.hp-controls > button {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  padding: 10px;\n  white-space: nowrap;\n  font-size: 12px;\n  flex: 1;\n}\n.hp-controls > button:hover:not(:disabled) {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 6%, var(--hp-surface));\n}\n.hp-icon-button {\n  background: none;\n  border: 0;\n  display: grid;\n  place-items: center;\n  padding: 6px;\n  flex: 0 0 39px !important;\n}\n.hp-note {\n  border-top: 1px solid var(--hp-line);\n  margin-top: 22px;\n  padding-top: 17px;\n  display: flex;\n  gap: 10px;\n  align-items: center;\n  color: var(--hp-muted);\n}\n.hp-note p {\n  font-size: 11px;\n}\n.hp-note small {\n  display: block;\n  font-size: 10px;\n  margin-top: 3px;\n  opacity: 0.8;\n}\n.hp-note-icon {\n  display: flex;\n  opacity: 0.8;\n}\n.hp-settings {\n  margin-top: 18px;\n  border-top: 1px solid var(--hp-line);\n  padding-top: 13px;\n}\n.hp-section-title {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 10px;\n}\n.hp-section-title h3 {\n  font-size: 12px;\n  font-weight: 500;\n}\n.hp-input-row {\n  display: flex;\n  gap: 7px;\n}\n.hp-small-primary {\n  border: 0;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  border-radius: 7px;\n  padding: 0 12px;\n  font-size: 11px !important;\n}\n.hp-motion {\n  display: flex;\n  align-items: flex-start;\n  gap: 9px;\n  margin: 17px 0;\n  font-size: 11px;\n}\n.hp-motion input {\n  accent-color: var(--hp-accent);\n  margin: 2px 0;\n}\n.hp-motion small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  line-height: 1.6;\n  margin-top: 4px;\n}\n.hp-setting-action {\n  display: flex;\n  align-items: center;\n  gap: 9px;\n  width: 100%;\n  padding: 10px 0;\n  border: 0;\n  border-top: 1px solid var(--hp-line);\n  background: none;\n  text-align: left;\n  font-size: 11px !important;\n}\n.hp-setting-action svg:last-child:not(:first-child) {\n  margin-left: auto;\n}\n.hp-warning {\n  padding: 10px 18px;\n  font-size: 11px;\n  color: var(--hp-text);\n}\n.hp-motion-note {\n  margin-top: 12px !important;\n}\n.hp-status-dot {\n  margin-left: 1px;\n}\n@container (max-width:290px) {\n  .hp-choice,\n  .hp-living {\n    padding: 15px 12px;\n  }\n  .hp-card strong {\n    font-size: 9px;\n  }\n  .hp-preview {\n    height: 72px;\n  }\n  .hp-starters {\n    gap: 5px;\n  }\n  .hp-card {\n    padding-top: 9px;\n  }\n  .hp-number {\n    font-size: 7px;\n  }\n  .hp-controls > button {\n    gap: 5px;\n    padding: 9px 7px;\n    font-size: 11px;\n  }\n  .hp-footer > span:last-child {\n    display: none;\n  }\n  .hp-intro h2 {\n    font-size: 25px;\n  }\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-living {\n    display: grid;\n    grid-template-columns: minmax(220px, 1fr) minmax(200px, 0.85fr);\n    gap: 24px;\n    max-width: 850px;\n    margin: auto;\n  }\n  .hp-companion-column {\n    padding-top: 18px;\n  }\n  .hp-note {\n    margin-top: 15px;\n  }\n  .hp-stage {\n    max-width: 360px;\n  }\n  .hp-choice {\n    max-width: 550px;\n    margin: auto;\n  }\n  .hp-intro {\n    margin-bottom: 15px;\n  }\n  .hp-intro h2 {\n    font-size: 23px;\n  }\n  .hp-intro br {\n    display: none;\n  }\n  .hp-starters {\n    max-width: 350px;\n    margin: auto;\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .hp-root {\n    --hp-bg: var(--ui-bg-editor, #202820);\n    --hp-surface: var(--ui-bg-elevated, #283128);\n    --hp-text: var(--ui-text-primary, #e0e4d5);\n    --hp-muted: var(--ui-text-tertiary, #a0af98);\n    --hp-line: var(--ui-stroke-secondary, #3c4939);\n    --hp-accent: var(--ui-accent, #8aa77c);\n  }\n}\n@media (prefers-reduced-motion: reduce) {\n  .hp-root * {\n    transition: none !important;\n    animation: none !important;\n  }\n}\n/* Keep the initial choice and primary controls within a compact dock. */\n.hp-choice {\n  padding-top: 20px;\n}\n.hp-intro {\n  margin-bottom: 18px;\n}\n.hp-preview {\n  height: 76px;\n}\n.hp-trait {\n  padding: 13px 0 15px;\n}\n.hp-companion-column {\n  padding-top: 18px;\n}\n.hp-status {\n  min-height: 28px;\n}\n.hp-controls {\n  margin-top: 8px;\n}\n.hp-note {\n  margin-top: 16px;\n  padding-top: 12px;\n}\n.hp-note {\n  margin-top: 12px;\n  padding-top: 10px;\n}\n.hp-companion-column {\n  padding-top: 14px;\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-scene-column {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n  }\n  .hp-garden-label,\n  .hp-scene-foot {\n    align-self: stretch;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 165px) * 4 / 3));\n    min-width: 160px;\n    max-width: 360px;\n  }\n  .hp-companion-column {\n    padding-top: 8px;\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-note,\n  .hp-scene-foot {\n    display: none;\n  }\n  .hp-living {\n    padding: 12px 18px;\n  }\n  .hp-companion-column {\n    padding-top: 0;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 140px) * 4 / 3));\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-stage {\n    min-width: 152px;\n  }\n}\n\n/* v0.2 \u2014 roomier garden, four compact controls, sky picker. */\n.hp-living {\n  padding: 12px;\n}\n.hp-stage {\n  border-radius: 8px;\n  background: #88c36b;\n  box-shadow: 0 1px 0 color-mix(in srgb, var(--hp-text) 8%, transparent);\n}\n.hp-companion-column {\n  padding-top: 12px;\n}\n.hp-name-row {\n  align-items: flex-start;\n}\n.hp-name-row h2 {\n  font-size: 22px;\n  margin-top: 0;\n  line-height: 1.2;\n}\n.hp-status {\n  min-height: 0;\n  margin-top: 2px !important;\n}\n.hp-controls {\n  gap: 6px;\n  margin-top: 10px;\n}\n.hp-controls > button {\n  padding: 8px 6px;\n  gap: 6px;\n  min-width: 0;\n}\n.hp-controls > button > span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.hp-controls > button:active:not(:disabled) {\n  transform: translateY(1px);\n}\n.hp-hint {\n  display: flex;\n  gap: 8px;\n  align-items: flex-start;\n  margin-top: 12px !important;\n  font-size: 11px;\n  color: var(--hp-muted);\n  line-height: 1.5;\n}\n.hp-hint svg {\n  flex-shrink: 0;\n  margin-top: 2px;\n}\n.hp-sky {\n  margin-top: 16px;\n}\n.hp-sky small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  margin-top: 6px;\n}\n.hp-segmented {\n  display: flex;\n  margin-top: 6px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  overflow: hidden;\n}\n.hp-segmented button {\n  flex: 1;\n  border: 0;\n  background: var(--hp-surface);\n  padding: 6px 2px;\n  font-size: 10.5px !important;\n  min-width: 0;\n}\n.hp-segmented button + button {\n  border-left: 1px solid var(--hp-line);\n}\n.hp-segmented button[aria-checked="true"] {\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4);\n}\n@container (max-width: 330px) {\n  .hp-controls > button > span {\n    display: none;\n  }\n}\n@container (max-width: 290px) {\n  .hp-living {\n    padding: 10px;\n  }\n}\n.hp-preview {\n  object-fit: contain;\n  image-rendering: pixelated;\n}\n.hp-memories { margin-top: 12px; padding: 14px 0 0; border-top: 1px solid var(--hp-line); }\n.hp-memories dl { margin: 10px 0; display: grid; gap: 10px; font-size: 11px; }\n.hp-memories dl > div { display: grid; grid-template-columns: 1fr 1.3fr; gap: 12px; }\n.hp-memories dt { color: var(--hp-muted); }\n.hp-memories dd { margin: 0; text-align: right; }\n.hp-memories time { display: block; color: var(--hp-muted); font-size: 9px; margin-top: 3px; }\n.hp-memories p { font-size: 10px; line-height: 1.6; color: var(--hp-muted); }\n.hp-season .hp-segmented button { padding-inline: 4px; font-size: 10px; }\n.hp-hemisphere { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; }\n.hp-keepsakes { margin: 4px 0 10px; }\n.hp-keepsakes .hp-label small { color: var(--hp-muted); font-weight: 400; margin-left: 6px; }\n.hp-keepsakes ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }\n.hp-keepsakes li { font-size: 10px; padding: 3px 8px; border: 1px solid var(--hp-line); border-radius: 999px; }\n.hp-keepsakes > small { display: block; margin-top: 6px; font-size: 10px; color: var(--hp-muted); line-height: 1.5; }\n\n.hp-keepsakes li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }\n.hp-place { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hp-line, rgba(0,0,0,.18)); background: transparent; color: inherit; cursor: pointer; }\n.hp-place[aria-pressed="true"] { background: var(--hp-accent-soft, rgba(95,154,79,.18)); }\n.hp-place:disabled { opacity: .45; cursor: default; }\n\n/* Keyboard access to the garden: a visible outline on the canvas, a ring drawn inside it, and\n   announcements for screen readers. */\n.hp-stage canvas:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: -2px;\n}\n.hp-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  overflow: hidden;\n  clip: rect(0 0 0 0);\n  clip-path: inset(50%);\n  white-space: nowrap;\n}\n\n/* Status-bar presence: a tiny sprite and what the companion is doing, docked away or not. */\n.hp-statusbar {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  max-width: 260px;\n  padding: 0 6px;\n  border: 0;\n  background: none;\n  color: inherit;\n  font: inherit;\n  font-size: 11px;\n  line-height: 1;\n  cursor: pointer;\n  white-space: nowrap;\n  overflow: hidden;\n}\n.hp-statusbar canvas {\n  width: 18px;\n  height: 18px;\n  image-rendering: pixelated;\n  flex: none;\n}\n.hp-statusbar span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.hp-statusbar strong {\n  font-weight: 600;\n  margin-right: 4px;\n}\n';
+var styles_default = '.hp-root {\n  --hp-bg: var(--ui-bg-editor, #f7f7ef);\n  --hp-surface: var(--ui-bg-elevated, #fffef7);\n  --hp-text: var(--ui-text-primary, #343d34);\n  --hp-muted: var(--ui-text-tertiary, #75816f);\n  --hp-line: var(--ui-stroke-secondary, #dfe3d5);\n  --hp-accent: var(--ui-accent, #547653);\n  height: 100%;\n  width: 100%;\n  min-width: 220px;\n  display: flex;\n  flex-direction: column;\n  background: var(--hp-bg);\n  color: var(--hp-text);\n  font:\n    13px/1.5 "Segoe UI",\n    system-ui,\n    sans-serif;\n  container-type: size;\n  isolation: isolate;\n  box-sizing: border-box;\n  text-align: left;\n}\n.hp-root * {\n  box-sizing: border-box;\n}\n.hp-root button,\n.hp-root input {\n  font: inherit;\n}\n.hp-root button {\n  cursor: pointer;\n}\n.hp-root button:disabled {\n  cursor: default;\n  opacity: 0.5;\n}\n.hp-root button:focus-visible,\n.hp-root input:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: 3px;\n}\n.hp-root button {\n  color: inherit;\n}\n.hp-root h2,\n.hp-root h3,\n.hp-root p {\n  margin: 0;\n}\n.hp-header {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 14px 18px;\n  border-bottom: 1px solid var(--hp-line);\n  font-size: 12px;\n  flex-shrink: 0;\n  letter-spacing: -0.15px;\n}\n.hp-brand-icon {\n  display: grid;\n  place-items: center;\n  color: var(--hp-accent);\n}\n.hp-header strong {\n  font-weight: 600;\n}\n.hp-version {\n  margin-left: auto;\n  color: var(--hp-muted);\n  font: 10px monospace;\n  border: 1px solid var(--hp-line);\n  border-radius: 4px;\n  padding: 1px 5px;\n}\n.hp-scroll {\n  overflow: auto;\n  flex: 1;\n  min-height: 0;\n  scrollbar-width: thin;\n}\n.hp-footer {\n  display: flex;\n  justify-content: space-between;\n  gap: 8px;\n  padding: 12px 18px;\n  border-top: 1px solid var(--hp-line);\n  color: var(--hp-muted);\n  font-size: 10px;\n  flex-shrink: 0;\n}\n.hp-footer > span:first-child {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n.hp-footer > span:last-child {\n  font: 8px/15px monospace;\n  letter-spacing: 1px;\n}\n.hp-footer i,\n.hp-garden-label i {\n  display: inline-block;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-accent);\n}\n.hp-choice {\n  padding: 26px 18px 15px;\n}\n.hp-intro {\n  text-align: center;\n  margin-bottom: 24px;\n}\n.hp-eyebrow {\n  font: 9px/1.5 monospace;\n  letter-spacing: 1.7px;\n  color: var(--hp-muted);\n}\n.hp-intro h2 {\n  font:\n    500 27px/1.2 Georgia,\n    serif;\n  letter-spacing: -0.8px;\n  margin: 12px 0;\n}\n.hp-intro p {\n  color: var(--hp-muted);\n  font-size: 12px;\n  line-height: 1.65;\n}\n.hp-starters {\n  display: grid;\n  grid-template-columns: repeat(3, minmax(0, 1fr));\n  gap: 7px;\n}\n.hp-card {\n  position: relative;\n  border: 1px solid var(--hp-line);\n  border-radius: 10px;\n  background: var(--hp-surface);\n  padding: 12px 4px 10px;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  min-width: 0;\n  transition:\n    border-color 0.15s,\n    background 0.15s;\n}\n.hp-card[aria-pressed="true"] {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 9%, var(--hp-surface));\n  box-shadow: 0 0 0 1px var(--hp-accent);\n}\n.hp-number {\n  align-self: flex-start;\n  color: var(--hp-muted);\n  font: 8px monospace;\n  margin-left: 6px;\n}\n.hp-choice-dot {\n  position: absolute;\n  right: 8px;\n  top: 12px;\n  width: 5px;\n  height: 5px;\n  border-radius: 50%;\n  background: var(--hp-line);\n}\n.hp-card[aria-pressed="true"] .hp-choice-dot {\n  background: var(--hp-accent);\n}\n.hp-preview {\n  width: 100%;\n  height: 85px;\n  image-rendering: pixelated;\n}\n.hp-card strong {\n  font-size: 11px;\n  letter-spacing: -0.3px;\n}\n.hp-type {\n  font-size: 9px;\n  margin-top: 3px;\n  color: var(--hp-muted);\n}\n.hp-trait {\n  text-align: center;\n  font-size: 12px !important;\n  padding: 17px 0 21px;\n}\n.hp-trait span {\n  display: block;\n  font-size: 10px;\n  color: var(--hp-muted);\n  margin-top: 4px;\n}\n.hp-label {\n  display: flex;\n  justify-content: space-between;\n  font-size: 11px;\n  margin-bottom: 8px;\n}\n.hp-label span {\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-root input:not([type="checkbox"]) {\n  width: 100%;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  color: var(--hp-text);\n  padding: 10px 12px;\n  min-width: 0;\n}\n.hp-root input::placeholder {\n  color: var(--hp-muted);\n}\n.hp-primary {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 13px;\n  width: 100%;\n  border: 0;\n  border-radius: 7px;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  padding: 12px;\n  margin-top: 12px;\n  font-weight: 600 !important;\n  font-size: 12px !important;\n}\n.hp-primary:hover,\n.hp-small-primary:hover {\n  filter: brightness(1.08);\n}\n.hp-fine {\n  font-size: 9px !important;\n  line-height: 1.7;\n  color: var(--hp-muted);\n  text-align: center;\n  margin-top: 18px !important;\n}\n.hp-text-button {\n  background: none;\n  border: 0;\n  display: block;\n  margin: 13px auto 0;\n  font-size: 11px !important;\n  color: var(--hp-muted) !important;\n  text-decoration: underline;\n  text-underline-offset: 3px;\n}\n.hp-living {\n  padding: 18px;\n}\n.hp-garden-label {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  margin-bottom: 12px;\n  color: var(--hp-muted);\n  font-size: 10px;\n}\n.hp-garden-label > span:first-child {\n  display: flex;\n  gap: 6px;\n  align-items: center;\n  font: 9px monospace;\n  letter-spacing: 1.1px;\n}\n.hp-garden-label > span:last-child {\n  font-family: Georgia, serif;\n  font-style: italic;\n  font-size: 12px;\n}\n.hp-stage {\n  width: 100%;\n  aspect-ratio: 4/3;\n  position: relative;\n  border-radius: 10px;\n  overflow: hidden;\n  border: 1px solid color-mix(in srgb, var(--hp-accent) 25%, transparent);\n  background: var(--hp-surface);\n}\n.hp-stage canvas {\n  display: block;\n  width: 100%;\n  height: 100%;\n  image-rendering: pixelated;\n  cursor: pointer;\n  color: var(--hp-text);\n}\n.hp-loading {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-items: center;\n  background: var(--hp-surface);\n  font-size: 12px;\n  padding: 20px;\n  text-align: center;\n}\n.hp-scene-foot {\n  display: flex;\n  justify-content: space-between;\n  padding-top: 8px;\n  font: 7px monospace;\n  letter-spacing: 1.25px;\n  color: var(--hp-muted);\n}\n.hp-companion-column {\n  padding-top: 23px;\n}\n.hp-card-level {\n  color: var(--hp-muted);\n  font: 9px monospace;\n  margin-top: 5px;\n}\n.hp-growth {\n  margin-top: 15px;\n  font-size: 10px;\n  color: var(--hp-muted);\n}\n.hp-growth-line {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: baseline;\n  justify-content: space-between;\n  gap: 4px 10px;\n  margin-bottom: 7px;\n}\n.hp-growth-line strong { color: var(--hp-text); margin-left: 5px; font-weight: 500; }\n.hp-growth progress {\n  display: block;\n  appearance: none;\n  width: 100%;\n  height: 5px;\n  border: none;\n  border-radius: 4px;\n  overflow: hidden;\n  background: var(--hp-line);\n  accent-color: var(--hp-accent);\n}\n.hp-growth progress::-webkit-progress-bar { background: var(--hp-line); }\n.hp-growth progress::-webkit-progress-value { background: var(--hp-accent); border-radius: 4px; }\n.hp-growth progress::-moz-progress-bar { background: var(--hp-accent); }\n.hp-growth-notice { margin-top: 8px !important; color: var(--hp-accent); }\n.hp-growth-help { margin-top: 9px; line-height: 1.65; }\n.hp-growth-help summary { cursor: pointer; width: fit-content; }\n.hp-growth-help p { margin-top: 7px !important; }\n.hp-evolve-offer {\n  margin-top: 10px;\n  width: 100%;\n  display: flex;\n  gap: 8px;\n  align-items: center;\n  justify-content: space-between;\n  padding: 9px 10px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  text-align: left;\n  font-size: 11px !important;\n  color: var(--hp-accent) !important;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-evolution-choice {\n  margin-top: 10px;\n  padding: 12px;\n  border: 1px solid var(--hp-line);\n  border-radius: 9px;\n  background: var(--hp-surface);\n  line-height: 1.6;\n}\n.hp-evolution-choice .hp-preview { float: right; width: 76px; height: 76px; object-fit: contain; }\n.hp-evolution-choice p { color: var(--hp-text); margin-bottom: 8px !important; }\n.hp-evolution-choice small { display: block; font-size: 10px; }\n.hp-evolution-actions { clear: both; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }\n.hp-evolution-actions button { border: 1px solid var(--hp-line); border-radius: 6px; padding: 8px; font-size: 11px !important; background: var(--hp-surface); }\n.hp-evolution-actions .hp-small-primary { background: var(--hp-accent); }\n.hp-evolution-choice > small:last-child { margin-top: 8px; }\n.hp-name-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 12px;\n}\n.hp-name-row > div {\n  min-width: 0;\n}\n.hp-name-row h2 {\n  font:\n    500 27px/1.3 Georgia,\n    serif;\n  margin-top: 4px;\n  overflow-wrap: anywhere;\n  letter-spacing: -0.5px;\n}\n.hp-badge {\n  border: 1px solid var(--hp-line);\n  padding: 4px 9px;\n  border-radius: 20px;\n  font-size: 10px;\n  background: color-mix(in srgb, var(--hp-accent) 7%, var(--hp-surface));\n}\n.hp-status {\n  font-size: 12px;\n  color: var(--hp-muted);\n  margin-top: 5px !important;\n  min-height: 36px;\n}\n.hp-controls {\n  display: flex;\n  gap: 8px;\n  margin-top: 12px;\n}\n.hp-controls > button {\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  background: var(--hp-surface);\n  padding: 10px;\n  white-space: nowrap;\n  font-size: 12px;\n  flex: 1;\n}\n.hp-controls > button:hover:not(:disabled) {\n  border-color: var(--hp-accent);\n  background: color-mix(in srgb, var(--hp-accent) 6%, var(--hp-surface));\n}\n.hp-icon-button {\n  background: none;\n  border: 0;\n  display: grid;\n  place-items: center;\n  padding: 6px;\n  flex: 0 0 39px !important;\n}\n.hp-note {\n  border-top: 1px solid var(--hp-line);\n  margin-top: 22px;\n  padding-top: 17px;\n  display: flex;\n  gap: 10px;\n  align-items: center;\n  color: var(--hp-muted);\n}\n.hp-note p {\n  font-size: 11px;\n}\n.hp-note small {\n  display: block;\n  font-size: 10px;\n  margin-top: 3px;\n  opacity: 0.8;\n}\n.hp-note-icon {\n  display: flex;\n  opacity: 0.8;\n}\n.hp-settings {\n  margin-top: 18px;\n  border-top: 1px solid var(--hp-line);\n  padding-top: 13px;\n}\n.hp-section-title {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 10px;\n}\n.hp-section-title h3 {\n  font-size: 12px;\n  font-weight: 500;\n}\n.hp-input-row {\n  display: flex;\n  gap: 7px;\n}\n.hp-small-primary {\n  border: 0;\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4) !important;\n  border-radius: 7px;\n  padding: 0 12px;\n  font-size: 11px !important;\n}\n.hp-motion {\n  display: flex;\n  align-items: flex-start;\n  gap: 9px;\n  margin: 17px 0;\n  font-size: 11px;\n}\n.hp-motion input {\n  accent-color: var(--hp-accent);\n  margin: 2px 0;\n}\n.hp-motion small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  line-height: 1.6;\n  margin-top: 4px;\n}\n.hp-setting-action {\n  display: flex;\n  align-items: center;\n  gap: 9px;\n  width: 100%;\n  padding: 10px 0;\n  border: 0;\n  border-top: 1px solid var(--hp-line);\n  background: none;\n  text-align: left;\n  font-size: 11px !important;\n}\n.hp-setting-action svg:last-child:not(:first-child) {\n  margin-left: auto;\n}\n.hp-warning {\n  padding: 10px 18px;\n  font-size: 11px;\n  color: var(--hp-text);\n}\n.hp-motion-note {\n  margin-top: 12px !important;\n}\n.hp-status-dot {\n  margin-left: 1px;\n}\n@container (max-width:290px) {\n  .hp-choice,\n  .hp-living {\n    padding: 15px 12px;\n  }\n  .hp-card strong {\n    font-size: 9px;\n  }\n  .hp-preview {\n    height: 72px;\n  }\n  .hp-starters {\n    gap: 5px;\n  }\n  .hp-card {\n    padding-top: 9px;\n  }\n  .hp-number {\n    font-size: 7px;\n  }\n  .hp-controls > button {\n    gap: 5px;\n    padding: 9px 7px;\n    font-size: 11px;\n  }\n  .hp-footer > span:last-child {\n    display: none;\n  }\n  .hp-intro h2 {\n    font-size: 25px;\n  }\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-living {\n    display: grid;\n    grid-template-columns: minmax(220px, 1fr) minmax(200px, 0.85fr);\n    gap: 24px;\n    max-width: 850px;\n    margin: auto;\n  }\n  .hp-companion-column {\n    padding-top: 18px;\n  }\n  .hp-note {\n    margin-top: 15px;\n  }\n  .hp-stage {\n    max-width: 360px;\n  }\n  .hp-choice {\n    max-width: 550px;\n    margin: auto;\n  }\n  .hp-intro {\n    margin-bottom: 15px;\n  }\n  .hp-intro h2 {\n    font-size: 23px;\n  }\n  .hp-intro br {\n    display: none;\n  }\n  .hp-starters {\n    max-width: 350px;\n    margin: auto;\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .hp-root {\n    --hp-bg: var(--ui-bg-editor, #202820);\n    --hp-surface: var(--ui-bg-elevated, #283128);\n    --hp-text: var(--ui-text-primary, #e0e4d5);\n    --hp-muted: var(--ui-text-tertiary, #a0af98);\n    --hp-line: var(--ui-stroke-secondary, #3c4939);\n    --hp-accent: var(--ui-accent, #8aa77c);\n  }\n}\n@media (prefers-reduced-motion: reduce) {\n  .hp-root * {\n    transition: none !important;\n    animation: none !important;\n  }\n}\n/* Keep the initial choice and primary controls within a compact dock. */\n.hp-choice {\n  padding-top: 20px;\n}\n.hp-intro {\n  margin-bottom: 18px;\n}\n.hp-preview {\n  height: 76px;\n}\n.hp-trait {\n  padding: 13px 0 15px;\n}\n.hp-companion-column {\n  padding-top: 18px;\n}\n.hp-status {\n  min-height: 28px;\n}\n.hp-controls {\n  margin-top: 8px;\n}\n.hp-note {\n  margin-top: 16px;\n  padding-top: 12px;\n}\n.hp-note {\n  margin-top: 12px;\n  padding-top: 10px;\n}\n.hp-companion-column {\n  padding-top: 14px;\n}\n@container (min-width:560px) and (max-height:430px) {\n  .hp-scene-column {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n  }\n  .hp-garden-label,\n  .hp-scene-foot {\n    align-self: stretch;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 165px) * 4 / 3));\n    min-width: 160px;\n    max-width: 360px;\n  }\n  .hp-companion-column {\n    padding-top: 8px;\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-note,\n  .hp-scene-foot {\n    display: none;\n  }\n  .hp-living {\n    padding: 12px 18px;\n  }\n  .hp-companion-column {\n    padding-top: 0;\n  }\n  .hp-stage {\n    width: min(100%, calc((100cqh - 140px) * 4 / 3));\n  }\n}\n@container (min-width:560px) and (max-height:300px) {\n  .hp-stage {\n    min-width: 152px;\n  }\n}\n\n/* v0.2 \u2014 roomier garden, four compact controls, sky picker. */\n.hp-living {\n  padding: 12px;\n}\n.hp-stage {\n  border-radius: 8px;\n  background: #88c36b;\n  box-shadow: 0 1px 0 color-mix(in srgb, var(--hp-text) 8%, transparent);\n}\n.hp-companion-column {\n  padding-top: 12px;\n}\n.hp-name-row {\n  align-items: flex-start;\n}\n.hp-name-row h2 {\n  font-size: 22px;\n  margin-top: 0;\n  line-height: 1.2;\n}\n.hp-status {\n  min-height: 0;\n  margin-top: 2px !important;\n}\n.hp-controls {\n  gap: 6px;\n  margin-top: 10px;\n}\n.hp-controls > button {\n  padding: 8px 6px;\n  gap: 6px;\n  min-width: 0;\n}\n.hp-controls > button > span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.hp-controls > button:active:not(:disabled) {\n  transform: translateY(1px);\n}\n.hp-hint {\n  display: flex;\n  gap: 8px;\n  align-items: flex-start;\n  margin-top: 12px !important;\n  font-size: 11px;\n  color: var(--hp-muted);\n  line-height: 1.5;\n}\n.hp-hint svg {\n  flex-shrink: 0;\n  margin-top: 2px;\n}\n.hp-sky {\n  margin-top: 16px;\n}\n.hp-sky small {\n  display: block;\n  color: var(--hp-muted);\n  font-size: 10px;\n  margin-top: 6px;\n}\n.hp-segmented {\n  display: flex;\n  margin-top: 6px;\n  border: 1px solid var(--hp-line);\n  border-radius: 7px;\n  overflow: hidden;\n}\n.hp-segmented button {\n  flex: 1;\n  border: 0;\n  background: var(--hp-surface);\n  padding: 6px 2px;\n  font-size: 10.5px !important;\n  min-width: 0;\n}\n.hp-segmented button + button {\n  border-left: 1px solid var(--hp-line);\n}\n.hp-segmented button[aria-checked="true"] {\n  background: var(--hp-accent);\n  color: var(--dt-midground-foreground, #fffef4);\n}\n@container (max-width: 330px) {\n  .hp-controls > button > span {\n    display: none;\n  }\n}\n@container (max-width: 290px) {\n  .hp-living {\n    padding: 10px;\n  }\n}\n.hp-preview {\n  object-fit: contain;\n  image-rendering: pixelated;\n}\n.hp-memories { margin-top: 12px; padding: 14px 0 0; border-top: 1px solid var(--hp-line); }\n.hp-memories dl { margin: 10px 0; display: grid; gap: 10px; font-size: 11px; }\n.hp-memories dl > div { display: grid; grid-template-columns: 1fr 1.3fr; gap: 12px; }\n.hp-memories dt { color: var(--hp-muted); }\n.hp-memories dd { margin: 0; text-align: right; }\n.hp-memories time { display: block; color: var(--hp-muted); font-size: 9px; margin-top: 3px; }\n.hp-memories p { font-size: 10px; line-height: 1.6; color: var(--hp-muted); }\n.hp-season .hp-segmented button { padding-inline: 4px; font-size: 10px; }\n.hp-hemisphere { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; }\n.hp-keepsakes { margin: 4px 0 10px; }\n.hp-keepsakes .hp-label small { color: var(--hp-muted); font-weight: 400; margin-left: 6px; }\n.hp-keepsakes ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }\n.hp-keepsakes li { font-size: 10px; padding: 3px 8px; border: 1px solid var(--hp-line); border-radius: 999px; }\n.hp-keepsakes > small { display: block; margin-top: 6px; font-size: 10px; color: var(--hp-muted); line-height: 1.5; }\n\n.hp-keepsakes li { display: flex; align-items: center; justify-content: space-between; gap: 6px; }\n.hp-place { font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hp-line, rgba(0,0,0,.18)); background: transparent; color: inherit; cursor: pointer; }\n.hp-place[aria-pressed="true"] { background: var(--hp-accent-soft, rgba(95,154,79,.18)); }\n.hp-place:disabled { opacity: .45; cursor: default; }\n\n/* Keyboard access to the garden: a visible outline on the canvas, a ring drawn inside it, and\n   announcements for screen readers. */\n.hp-stage canvas:focus-visible {\n  outline: 2px solid var(--hp-accent);\n  outline-offset: -2px;\n}\n.hp-sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  overflow: hidden;\n  clip: rect(0 0 0 0);\n  clip-path: inset(50%);\n  white-space: nowrap;\n}\n\n/* Status-bar presence: a tiny sprite and what the companion is doing, docked away or not. */\n.hp-statusbar {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  max-width: 260px;\n  padding: 0 6px;\n  border: 0;\n  background: none;\n  color: inherit;\n  font: inherit;\n  font-size: 11px;\n  line-height: 1;\n  cursor: pointer;\n  white-space: nowrap;\n  overflow: hidden;\n}\n.hp-statusbar canvas {\n  width: 18px;\n  height: 18px;\n  image-rendering: pixelated;\n  flex: none;\n}\n.hp-statusbar span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.hp-statusbar strong {\n  font-weight: 600;\n  margin-right: 4px;\n}\n\n/* Level 50: a ribbon on the growth strip and the starter card. */\n.hp-ribbon {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  margin: 6px 0 0 !important;\n  font-size: 11px;\n  color: var(--hp-accent);\n}\n.hp-card-level svg {\n  vertical-align: -2px;\n  margin-left: 3px;\n  color: var(--hp-accent);\n}\n';
 
 // src/plugin.jsx
 import { jsx as jsx2 } from "react/jsx-runtime";

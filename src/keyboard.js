@@ -1,4 +1,4 @@
-import { SPOTS, TREE, POND } from "./world.js";
+import { SPOTS, TREE, POND, onTree, inPond } from "./world.js";
 
 // Keyboard access to the garden. The canvas takes focus; arrow keys move a focus ring between
 // your companion and the places you can explore together; Enter or Space acts on the ring, exactly
@@ -31,4 +31,31 @@ export function keyboardAction(key, current) {
 export function announce(index) {
   const target = TARGETS[index];
   return target ? `${target.label[0].toUpperCase()}${target.label.slice(1)}. Press Enter to ${target.hint}.` : "";
+}
+
+// What a garden point lands on, for clicks, keyboard activation and hover hints alike:
+// "companion" (when the pet and its hit box are given), "tree", "pond", "flowers", "grass"
+// (call it over) or null (fence and sky: just a glance).
+export function targetAt(p, pet = null, hit = null) {
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+  if (pet && hit) {
+    // The body sits above the feet; be generous so a quick click still pets.
+    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
+    if (Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14)) return "companion";
+  }
+  if (onTree(p)) return "tree";
+  if (inPond(p)) return "pond";
+  if (Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10) return "flowers";
+  if (p.y > 44) return "grass";
+  return null;
+}
+export const CURSORS = { companion: "grab", tree: "pointer", pond: "pointer", flowers: "pointer", grass: "pointer" };
+export function hintFor(id, nickname = "your companion") {
+  return {
+    companion: `Pet ${nickname}`,
+    tree: `Explore the old tree with ${nickname}`,
+    pond: `Explore the pond with ${nickname}`,
+    flowers: `Explore the flower bed with ${nickname}`,
+    grass: `Call ${nickname} over here`,
+  }[id] || "";
 }

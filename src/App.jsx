@@ -12,7 +12,8 @@ import { KEEPSAKES, KEEPSAKE_COUNT, MAX_PLACED } from "./keepsakes.js";
 import { WEATHER_SETTINGS, resolveWeather } from "./weather.js";
 import { daysTogether, milestoneName, rewardsFor, REWARDS, saplingStage, saplingLabel, untidyFor } from "./milestones.js";
 import { usualTimes } from "./rhythm.js";
-import { TARGETS, keyboardAction, announce } from "./keyboard.js";
+import { TARGETS, keyboardAction, announce, targetAt, hintFor, CURSORS } from "./keyboard.js";
+import { saveSnapshot } from "./snapshot.js";
 import { VISITORS } from "./visitors.js";
 
 function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve }) {
@@ -41,6 +42,7 @@ function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve 
       <span>{level === LEVEL_MAX ? "Max level" : `${progress.xp % XP_PER_LEVEL} / ${XP_PER_LEVEL} XP`}</span></div>
     <progress aria-label="Experience toward next level" max={XP_PER_LEVEL} value={level === LEVEL_MAX ? XP_PER_LEVEL : progress.xp % XP_PER_LEVEL} />
     {notice && <p className="hp-growth-notice" role="status">{notice}</p>}
+    {level === LEVEL_MAX && <p className="hp-ribbon"><Icon name="ribbon" size={14} /><span>Fully grown. A ribbon for the whole journey together.</span></p>}
     {eligible && !confirming && <button className="hp-evolve-offer" disabled={!ready || pet.evolving} onClick={() => setConfirming(true)}>
       {pet.evolving ? "Growing into something new…" : `Ready to evolve into ${next.name}`}<Icon name="arrow" size={14} />
     </button>}
@@ -131,6 +133,18 @@ export function Icon({ name, size = 18 }) {
     arrow: <path d="m9 5 7 7-7 7M4 12h12" />,
     close: <path d="m6 6 12 12M6 18 18 6" />,
     reset: <path d="M4 9a8 8 0 1 1 0 6M4 3v6h6" />,
+    camera: (
+      <>
+        <path d="M4 8h3l2-3h6l2 3h3v11H4Z" />
+        <circle cx="12" cy="13" r="3.5" />
+      </>
+    ),
+    ribbon: (
+      <>
+        <circle cx="12" cy="9" r="5" />
+        <path d="m9 13-2 8 5-3 5 3-2-8" />
+      </>
+    ),
   };
   return (
     <svg
@@ -234,7 +248,7 @@ function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
             <SpritePreview species={formFor(id, store.getProgression(id).stage)} ctx={ctx} bridge={bridge} reduced={reduced} selected={selected === id} />
             <strong>{s.name}</strong>
             <span className="hp-type">{s.type}</span>
-            {store.getProgression(id).xp > 0 && <small className="hp-card-level">Lv. {levelFromXp(store.getProgression(id).xp)}</small>}
+            {store.getProgression(id).xp > 0 && <small className="hp-card-level">Lv. {levelFromXp(store.getProgression(id).xp)}{levelFromXp(store.getProgression(id).xp) === LEVEL_MAX ? <Icon name="ribbon" size={11} /> : null}</small>}
           </button>
         ))}
       </div>
@@ -266,8 +280,9 @@ function Choice({ record, store, save, ctx, bridge, reduced, onCancel }) {
     </form>
   );
 }
-function Settings({ record, store, onClose, onChange, pet }) {
+function Settings({ record, store, onClose, onChange, onSnapshot, pet }) {
   const [name, setName] = useState(record.nickname);
+  const [saved, setSaved] = useState("");
   const first = useRef();
   useEffect(() => first.current?.focus(), []);
   return (
@@ -367,6 +382,11 @@ function Settings({ record, store, onClose, onChange, pet }) {
         Change starter
         <Icon name="arrow" size={15} />
       </button>
+      <button className="hp-setting-action" onClick={() => { const name = onSnapshot?.(); if (name) setSaved(name); }}>
+        <Icon name="camera" />
+        Save a snapshot
+      </button>
+      {saved && <p className="hp-fine" role="status">Saved {saved} to your downloads.</p>}
       <MemoryNote memory={store.getMemory(record.species)} onPlace={(id) => store.togglePlaced(record.species, id)} />
       <p className="hp-fine">
         Sprites: CHUNSOFT + SpriteCollab contributors.
@@ -427,7 +447,8 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   const [settings, setSettings] = useState(false),
     [error, setError] = useState(""),
     [ready, setReady] = useState(false),
-    [focused, setFocused] = useState(null);
+    [focused, setFocused] = useState(null),
+    [hover, setHover] = useState(null);
   useEffect(() => {
     setReady(false);
     setError("");
@@ -486,26 +507,32 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   };
   // One dispatch for clicks and keyboard activation: a point in the garden, and whether it is
   // the companion itself.
-  function actAt(p, companion) {
+  function actAt(p, id) {
     // While Hermes has a question, tapping the companion also puts the caret in the composer.
-    if (companion && pet.state === "waiting") bridge.focusComposer?.();
-    if (companion) pet.pet();
-    else if (onTree(p)) { pet.investigate(p, "tree"); pet.emit("leaves", { x: p.x, y: p.y }); }
-    else if (inPond(p)) { pet.investigate(p, "pond"); pet.emit("splash", { x: p.x, y: p.y + 2 }); }
-    else if (Math.hypot(p.x - SPOTS.flowers.x, p.y - SPOTS.flowers.y) < 10) pet.investigate(p, "flowers");
-    else if (p.y > 44) pet.callTo(p);
+    if (id === "companion" && pet.state === "waiting") bridge.focusComposer?.();
+    if (id === "companion") pet.pet();
+    else if (id === "tree") { pet.investigate(p, "tree"); pet.emit("leaves", { x: p.x, y: p.y }); }
+    else if (id === "pond") { pet.investigate(p, "pond"); pet.emit("splash", { x: p.x, y: p.y + 2 }); }
+    else if (id === "flowers") pet.investigate(p, "flowers");
+    else if (id === "grass") pet.callTo(p);
     else pet.notice(p);
     memory.current?.flush();
     setStatus(snapshot());
   }
+  const pointAt = (event) => {
+    const box = canvas.current.getBoundingClientRect();
+    return runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
+  };
   function clickGarden(event) {
     if (!ready || pet.evolving) return;
-    const box = canvas.current.getBoundingClientRect();
-    const p = runtime.current.toWorld((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
-    // The body sits above the feet; be generous so a quick click still pets.
-    const hit = FORMS[form];
-    const bodyY = pet.y - (pet.swimming ? 6 : hit.bodyHeight / 2);
-    actAt(p, Math.abs(p.x - pet.x) < (hit.hitWidth || 13) && Math.abs(p.y - bodyY) < (hit.hitHeight || 14));
+    const p = pointAt(event);
+    actAt(p, targetAt(p, pet, FORMS[form]));
+  }
+  // Hover: the cursor and the hint line say what a click here would do.
+  function hoverGarden(event) {
+    if (!ready) return;
+    const id = targetAt(pointAt(event), pet, FORMS[form]);
+    if (id !== hover) setHover(id);
   }
   // Keyboard: arrows move a focus ring between the companion and the scenery, Enter acts on it.
   const setFocus = (index) => { focusTarget.current = index; setFocused(index); };
@@ -517,7 +544,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     if (action.type === "move") return setFocus(action.index);
     if (!ready || pet.evolving) return;
     const target = TARGETS[action.index];
-    actAt(target.point || { x: pet.x, y: pet.y }, target.id === "companion");
+    actAt(target.point || { x: pet.x, y: pet.y }, target.id === "companion" ? "companion" : targetAt(target.point));
   }
   const s = SPECIES[record.species], currentForm = FORMS[form];
   return (
@@ -529,7 +556,10 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
             width="640"
             height="480"
             tabIndex={0}
+            style={{ cursor: CURSORS[hover] || "default" }}
             onClick={clickGarden}
+            onMouseMove={hoverGarden}
+            onMouseLeave={() => setHover(null)}
             onKeyDown={keyGarden}
             onFocus={() => { if (focusTarget.current === null && canvas.current?.matches?.(":focus-visible")) setFocus(0); }}
             onBlur={() => setFocus(null)}
@@ -583,12 +613,13 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
           return accepted;
         }} />
         {settings ? (
-          <Settings record={record} store={store} pet={pet} onClose={closeSettings} onChange={onChange} />
+          <Settings record={record} store={store} pet={pet} onClose={closeSettings} onChange={onChange}
+            onSnapshot={() => saveSnapshot(canvas.current, { nickname: record.nickname, form: currentForm.name, days: days.current })} />
         ) : (
           <p className="hp-hint">
             <Icon name="leaf" size={14} />
             <span>
-              {s.detail} Tap the garden to explore with {record.nickname}.
+              {hover ? hintFor(hover, record.nickname) : `${s.detail} Tap the garden to explore with ${record.nickname}.`}
             </span>
           </p>
         )}

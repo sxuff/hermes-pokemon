@@ -858,3 +858,18 @@
   font-weight: 600;
   margin-right: 4px;
 }
+
+/* Level 50: a ribbon on the growth strip and the starter card. */
+.hp-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0 !important;
+  font-size: 11px;
+  color: var(--hp-accent);
+}
+.hp-card-level svg {
+  vertical-align: -2px;
+  margin-left: 3px;
+  color: var(--hp-accent);
+}

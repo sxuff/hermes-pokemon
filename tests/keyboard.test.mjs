@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TARGETS, keyboardAction, announce } from "../src/keyboard.js";
+import { TARGETS, keyboardAction, announce, targetAt, hintFor, CURSORS } from "../src/keyboard.js";
 import { onTree, inPond, walkable, SPOTS } from "../src/world.js";
 
 test("arrow keys cycle the focus ring, Enter acts, Escape clears, other keys are left alone", () => {
@@ -30,4 +30,23 @@ test("every target points where a click there would land", () => {
   assert.equal(announce(1), "The old tree. Press Enter to explore it together.");
   assert.equal(announce(0), "Your companion. Press Enter to pet it.");
   assert.equal(announce(null), "");
+});
+
+test("a point maps to one target for clicks, keys and hover alike, with a cursor and a hint", () => {
+  const pet = { x: 80, y: 100, swimming: false };
+  const hit = { bodyHeight: 20, hitWidth: 13, hitHeight: 14 };
+  assert.equal(targetAt({ x: 80, y: 92 }, pet, hit), "companion");
+  assert.equal(targetAt({ x: 80, y: 92 }), "grass", "without a pet, the same point is grass");
+  assert.equal(targetAt({ x: 27, y: 28 }, pet, hit), "tree");
+  assert.equal(targetAt({ x: 116, y: 63 }, pet, hit), "pond");
+  assert.equal(targetAt({ x: 24, y: 100 }, pet, hit), "flowers");
+  assert.equal(targetAt({ x: 140, y: 100 }, pet, hit), "grass");
+  assert.equal(targetAt({ x: 100, y: 10 }, pet, hit), null, "sky is just a glance");
+  assert.equal(targetAt(null), null);
+  assert.equal(targetAt({ x: NaN, y: 1 }), null);
+  for (const t of TARGETS.filter((t) => t.point)) assert.equal(targetAt(t.point), t.id === "meadow" ? "grass" : t.id, t.id);
+  assert.equal(CURSORS.companion, "grab");
+  assert.equal(hintFor("tree", "Dario"), "Explore the old tree with Dario");
+  assert.equal(hintFor("grass", "Dario"), "Call Dario over here");
+  assert.equal(hintFor(null), "");
 });
