@@ -36,7 +36,7 @@ async (page) => {
   await page.getByRole('radio',{name:'Calendar',exact:true}).click();
   await page.getByRole('button',{name:'Close settings'}).click();
   await page.reload(); await ready();
-  check(await page.evaluate(() => __demo.diagnostics().saved.season === 'auto' && __demo.diagnostics().saved.version === 5), 'Season/v5 save not persisted');
+  check(await page.evaluate(() => __demo.diagnostics().saved.season === 'auto' && __demo.diagnostics().saved.version === 6), 'Season/v6 save not persisted');
 
   // Long turn: company while it runs, a bigger cheer when it lands. Short turns stay ordinary.
   await page.locator('[data-event="long"]').click();

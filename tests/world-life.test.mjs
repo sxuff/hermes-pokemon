@@ -462,3 +462,101 @@ test("the companion visits what you have earned: the bench by day, the lantern a
     assert.ok(reached, `${state} reached`);
   }
 });
+
+// ---- 9. Visitors remembered, greeted in character, and old friends (v0.7) ----------------------
+test("wild sightings are counted once per visit and survive validation; cameos are never logged", () => {
+  const data = new Map();
+  const storage = { get: (k, d) => (data.has(k) ? structuredClone(data.get(k)) : d), set: (k, v) => data.set(k, structuredClone(v)) };
+  const store = createPersistence(storage);
+  store.update({ species: "charmander" });
+  const pet = idlePet();
+  let clock = 1_700_000_000_000;
+  const controller = createCompanionMemory({ store, species: "charmander", pet, now: () => clock });
+  controller.setPresent(true);
+  assert.ok(pet.watchVisitor({ species: "pidgey", x: 88, y: 49, name: "Pidgey" }));
+  controller.flush();
+  assert.deepEqual(store.getMemory("charmander").sightings, { pidgey: { count: 1, firstAt: clock, lastAt: clock } });
+  clock += 60_000;
+  pet.start([{ kind: "pose", anim: "Idle", duration: 30, state: "idle" }]);
+  pet.watchVisitor({ species: "pidgey", x: 88, y: 49, name: "Pidgey" });
+  controller.flush();
+  assert.deepEqual(store.getMemory("charmander").sightings.pidgey, { count: 2, firstAt: clock - 60_000, lastAt: clock });
+  pet.start([{ kind: "pose", anim: "Idle", duration: 30, state: "idle" }]);
+  assert.ok(pet.watchVisitor({ species: "cameo:squirtle", x: 40, y: 94, name: "Squirtle", cameo: true }));
+  controller.flush();
+  assert.deepEqual(Object.keys(store.getMemory("charmander").sightings), ["pidgey"], "an old friend is not a wild sighting");
+  assert.deepEqual(validateMemory({ sightings: { pidgey: { count: 0, firstAt: 1, lastAt: 1 }, eevee: { count: 1, firstAt: 1, lastAt: 1 }, hoothoot: { count: 3, firstAt: 5, lastAt: 2 } } }).sightings,
+    { hoothoot: { count: 3, firstAt: 5, lastAt: 5 } }, "bad counts and unknown species are dropped, times are ordered");
+  assert.equal(store.sighting("charmander", "eevee", clock), false);
+  controller.dispose();
+});
+test("each starter greets its own visitors in character and stays on the ground", () => {
+  const cases = [["squirtle", "magikarp", /Splashing hello/], ["squirtle", "pidgey", /shell/], ["charmander", "caterpie", /Stamping/],
+    ["charmander", "hoothoot", /Flame up/], ["bulbasaur", "pidgey", /from the grass/], ["bulbasaur", "caterpie", /Making friends/], ["bulbasaur", "magikarp", /Watching a wild Magikarp/]];
+  for (const [species, visitor, pattern] of cases) {
+    const pet = idlePet(species);
+    assert.ok(pet.watchVisitor({ species: visitor, x: 60, y: 70, name: VISITORS[visitor].name }), `${species} ${visitor}`);
+    assert.equal(pet.state, "visitor");
+    assert.match(pet.caption, pattern);
+    for (let t = 0; t < 15 && pet.state === "visitor"; t += 0.05) {
+      pet.tick(0.05);
+      assert.ok(walkable(pet), `${species} ${visitor} off the ground`);
+    }
+    assert.notEqual(pet.state, "visitor", `${species} ${visitor} finishes`);
+    assert.equal(pet.dir, 0);
+  }
+  const quiet = idlePet("squirtle");
+  quiet.setReduced(true);
+  assert.ok(quiet.watchVisitor({ species: "magikarp", x: 120, y: 65, name: "Magikarp" }));
+  assert.match(quiet.caption, /Splashing hello/);
+  settle(quiet, 1);
+  assert.equal(quiet.anim.name, "Idle", "extra quiet mode keeps still");
+});
+test("an old friend walks in by the flowers and the companion goes over to say hello", () => {
+  const visitors = new Visitors(seq(0.1, 0.5));
+  visitors.setCameos([{ lineage: "bulbasaur", form: "ivysaur", name: "Bulbasaur" }, { lineage: "nope" }, null]);
+  assert.deepEqual(visitors.cameos, ["cameo:bulbasaur"]);
+  assert.equal(visitors.summon({ phase: "day", season: "summer", weather: "rain" }, "cameo:bulbasaur"), true, "a forced cameo still works");
+  assert.equal(visitors.current.sheet, "ivysaur", "drawn at the form it has reached");
+  assert.equal(visitors.current.cameo, true);
+  const arrived = [];
+  for (let t = 0; t < 30 && !arrived.length; t += 0.05) {
+    visitors.tick(0.05, { phase: "day", season: "summer", weather: "clear", reduced: false });
+    arrived.push(...visitors.drain().filter((e) => e.type === "arrived"));
+  }
+  assert.equal(arrived.length, 1);
+  assert.equal(arrived[0].name, "Bulbasaur");
+  assert.ok(walkable({ x: arrived[0].x, y: arrived[0].y }), "stands on open ground");
+  const pet = idlePet("charmander");
+  assert.ok(pet.watchVisitor(arrived[0]));
+  assert.match(pet.caption, /Saying hello to Bulbasaur/);
+  let hop = false;
+  for (let t = 0; t < 20 && pet.state === "visitor"; t += 0.05) {
+    pet.tick(0.05);
+    assert.ok(walkable(pet));
+    if (pet.anim.name === "Hop") hop = true;
+  }
+  assert.ok(hop, "a hop hello");
+  assert.ok(Math.hypot(pet.x - arrived[0].x, pet.y - arrived[0].y) < 24, "went over");
+  // Left alone, the cameo stays a while and walks out the way it came.
+  let left = false;
+  for (let t = 0; t < 60 && !left; t += 0.05) {
+    visitors.tick(0.05, { phase: "day", season: "summer", weather: "clear", reduced: false });
+    left = visitors.drain().some((e) => e.type === "left");
+  }
+  assert.ok(left && visitors.current === null);
+  // Unforced: cameos take their turn now and then, wild visitors otherwise, never in rain.
+  const counts = { cameo: 0, wild: 0 };
+  let seed = 3;
+  const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const v2 = new Visitors(random);
+  v2.setCameos([{ lineage: "squirtle", form: "squirtle", name: "Squirtle" }]);
+  for (let i = 0; i < 400; i++) {
+    v2.current = null;
+    v2.summon({ phase: "day", season: "summer", weather: "clear" });
+    counts[v2.current.cameo ? "cameo" : "wild"]++;
+  }
+  assert.ok(counts.cameo > 60 && counts.cameo < 180, `cameo share ${counts.cameo}/400`);
+  v2.current = null;
+  assert.equal(v2.summon({ phase: "day", season: "summer", weather: "rain" }), false, "nobody comes in the rain");
+});

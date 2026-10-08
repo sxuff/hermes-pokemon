@@ -265,6 +265,11 @@ var VISITORS = {
 var FIRST_VISIT = [60, 120];
 var VISIT_GAP = [180, 360];
 var STAY = [8, 14];
+var CAMEO_STAY = [14, 20];
+var CAMEO_CHANCE = 0.3;
+var CAMEO_SPOT = { x: SPOTS.flowers.x + 18, y: SPOTS.flowers.y - 4 };
+var cameoId = (lineage) => `cameo:${lineage}`;
+var isCameo = (id) => typeof id === "string" && id.startsWith("cameo:");
 var between = (random, [lo, hi]) => lo + random() * (hi - lo);
 function eligibleVisitors(phase, season, weather) {
   if (weather === "rain") return [];
@@ -277,20 +282,46 @@ var Visitors = class {
     this.events = [];
     this.nextAt = between(random, FIRST_VISIT);
     this.time = 0;
+    this.defs = { ...VISITORS };
   }
   drain() {
     return this.events.splice(0);
   }
+  // Starters you have raised before, as [{ lineage, form, name }]. Each becomes a possible cameo.
+  setCameos(list) {
+    for (const id of Object.keys(this.defs)) if (isCameo(id)) delete this.defs[id];
+    for (const c of Array.isArray(list) ? list : []) {
+      if (!c || typeof c.lineage !== "string" || typeof c.form !== "string") continue;
+      this.defs[cameoId(c.lineage)] = {
+        name: typeof c.name === "string" && c.name ? c.name : c.lineage,
+        cameo: true,
+        sheet: c.form,
+        from: { x: -12, y: CAMEO_SPOT.y },
+        to: { ...CAMEO_SPOT },
+        speed: 15
+      };
+    }
+  }
+  get cameos() {
+    return Object.keys(this.defs).filter(isCameo);
+  }
   // Starts a visit now if one is allowed. `species` forces a choice (preview only).
   summon({ phase, season, weather }, species) {
     if (this.current) return false;
-    const options = species ? [species] : eligibleVisitors(phase, season, weather);
+    let options;
+    if (species) options = [species];
+    else if (weather !== "rain" && this.cameos.length && this.random() < CAMEO_CHANCE) options = this.cameos;
+    else options = eligibleVisitors(phase, season, weather);
     const id = options[Math.floor(this.random() * options.length) % Math.max(1, options.length)];
-    if (!id || !VISITORS[id]) return false;
-    const v = VISITORS[id];
+    const v = id ? this.defs[id] : null;
+    if (!v) return false;
     const start = v.pond ? v.to : v.from;
     this.current = {
       species: id,
+      def: v,
+      name: v.name,
+      sheet: v.sheet || id,
+      cameo: Boolean(v.cameo),
       x: start.x,
       y: start.y,
       z: v.flies ? 28 : 0,
@@ -299,13 +330,17 @@ var Visitors = class {
       anim: v.pond ? "Hop" : "Walk",
       clock: 0,
       elapsed: 0,
-      stay: between(this.random, STAY)
+      stay: between(this.random, v.cameo ? CAMEO_STAY : STAY)
     };
     if (v.pond) {
       this.events.push({ type: "splash", x: start.x, y: start.y });
-      this.events.push({ type: "arrived", species: id, x: start.x, y: start.y });
+      this.events.push(this.arrival());
     }
     return true;
+  }
+  arrival() {
+    const c = this.current;
+    return { type: "arrived", species: c.species, name: c.name, cameo: c.cameo, x: c.x, y: c.y };
   }
   // Movement is linear with a little lift for fliers; ticks are bounded so a stall never jumps.
   tick(dt, { phase, season, weather, reduced }) {
@@ -324,7 +359,7 @@ var Visitors = class {
       }
       return;
     }
-    const v = VISITORS[c.species];
+    const v = c.def;
     c.clock += dt * 60;
     c.elapsed += dt;
     if (c.phase === "stay") {
@@ -337,6 +372,8 @@ var Visitors = class {
         }
         return;
       }
+      if (v.cameo && c.anim === "Idle" && c.clock > 300 && Math.floor(c.elapsed) % 5 === 0) Object.assign(c, { anim: "Hop", clock: 0 });
+      if (v.cameo && c.anim === "Hop" && c.clock > 60) Object.assign(c, { anim: "Idle", clock: 0 });
       if (c.elapsed >= c.stay) Object.assign(c, { phase: "leave", anim: "Walk", clock: 0, dir: v.from.x > c.x ? 2 : 6 });
       return;
     }
@@ -346,8 +383,8 @@ var Visitors = class {
     if (d <= step) {
       Object.assign(c, { x: target.x, y: target.y });
       if (c.phase === "arrive") {
-        Object.assign(c, { phase: "stay", anim: "Idle", clock: 0, elapsed: 0, z: 0, dir: 0 });
-        this.events.push({ type: "arrived", species: c.species, x: c.x, y: c.y });
+        Object.assign(c, { phase: "stay", anim: "Idle", clock: 0, elapsed: 0, z: 0, dir: v.cameo ? 2 : 0 });
+        this.events.push(this.arrival());
       } else {
         this.events.push({ type: "left", species: c.species });
         this.current = null;
@@ -1133,20 +1170,93 @@ var cues = {
 };
 
 // src/encounters.js
+var REACTIONS = {
+  squirtle: {
+    magikarp: { caption: (n) => `Splashing hello to a ${n}`, steps(state) {
+      return [
+        { kind: "pose", anim: "Hop", once: true, state },
+        { kind: "call", fn: () => this.say("heart", 1.4) },
+        { kind: "pose", anim: "Hop", once: true, rate: 1.1, state },
+        { kind: "pose", anim: "Idle", duration: 1.5, state }
+      ];
+    } },
+    pidgey: { caption: (n) => `Ducking into its shell. A ${n}!`, steps(state) {
+      return [{ kind: "pose", anim: "Withdraw", once: true, rate: 0.8, state }, { kind: "pose", anim: "Idle", duration: 2.5, state }];
+    } }
+  },
+  charmander: {
+    caterpie: { caption: (n) => `Stamping hello at a ${n}`, steps(state) {
+      return [
+        { kind: "pose", anim: "Kick", once: true, rate: 0.9, state },
+        { kind: "call", fn: () => this.emit("dust") },
+        { kind: "pose", anim: "Idle", duration: 1.2, state },
+        { kind: "pose", anim: "Nod", once: true, state }
+      ];
+    } },
+    hoothoot: { caption: (n) => `Flame up, watching a ${n}`, steps(state) {
+      return [{ kind: "call", fn: () => this.emit("embers") }, { kind: "pose", anim: "LookUp", duration: 3, state }, { kind: "pose", anim: "Nod", once: true, rate: 0.7, state }];
+    } }
+  },
+  bulbasaur: {
+    pidgey: { caption: (n) => `Watching a ${n} from the grass`, steps(state) {
+      return [{ kind: "pose", anim: "LookUp", duration: 2.4, state }, { kind: "pose", anim: "Nod", once: true, rate: 0.7, state }, { kind: "pose", anim: "Idle", duration: 1, state }];
+    } },
+    caterpie: { caption: (n) => `Making friends with a ${n}`, steps(state) {
+      return [
+        { kind: "pose", anim: "Sit", duration: 2, state },
+        { kind: "call", fn: () => this.say("heart", 1.4) },
+        { kind: "pose", anim: "Nod", once: true, rate: 0.7, state },
+        { kind: "pose", anim: "Idle", duration: 1, state }
+      ];
+    } }
+  }
+};
 var encounters = {
-  // A wild Pokémon stopped by: turn and watch it for a moment.
-  watchVisitor({ species, x, y } = {}) {
-    if (!Object.hasOwn(VISITORS, species) || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+  // A wild Pokémon stopped by: turn and watch it, with a small reaction of this starter's own.
+  // A cameo by another starter of yours gets a walk over and a hop hello instead.
+  watchVisitor({ species, x, y, name, cameo = false } = {}) {
+    const wild = Object.hasOwn(VISITORS, species);
+    if (!wild && !isCameo(species) || !Number.isFinite(x) || !Number.isFinite(y)) return false;
     if (this.busy || this.swimming || this.asleep || this.inviting || this.greetingActive || this.pendingGreeting || this.companyActive || ["petting", "waking", "eating", "investigating", "dozing", "treasure", "milestone", "offering", "proud", "celebrating"].includes(this.state))
       return false;
     this.visitor = species;
+    const label = wild ? VISITORS[species].name : typeof name === "string" && name ? name : "an old friend";
     const state = "visitor";
-    this.start([
-      { kind: "turn", dir: directionTo(x - this.x, y - this.y), state },
-      { kind: "call", fn: () => this.say("!", 1) },
-      ...this.species === "squirtle" && !this.reduced && this.random() < 0.4 ? [{ kind: "pose", anim: "Withdraw", once: true, rate: 0.8, state }] : [],
+    if (wild) {
+      this.memoryEvents.push({ type: "sighting", id: species });
+      this.trimMemory();
+    }
+    const face = { kind: "turn", dir: directionTo(x - this.x, y - this.y), state };
+    if (!wild) {
+      this.visitorCaption = `Saying hello to ${label}`;
+      const to = nearestWalkable({ x: x + 14, y: y + 2 });
+      this.start([
+        { kind: "call", fn: () => this.say("!", 1) },
+        ...this.reduced ? [face] : [{ kind: "walk", to, speed: SPECIES[this.species].speed * 1.2, state }],
+        { kind: "turn", dir: directionTo(x - this.x, y - this.y), state },
+        { kind: "call", fn: () => {
+          this.say("heart", 1.6);
+          this.emit("hearts", { count: 1 });
+        } },
+        { kind: "pose", anim: this.reduced ? "Idle" : "Hop", once: !this.reduced, duration: this.reduced ? 1 : void 0, state },
+        { kind: "pose", anim: "Idle", duration: 2.5, state },
+        ...this.reduced ? [] : [{ kind: "pose", anim: "Nod", once: true, rate: 0.8, state }],
+        { kind: "pose", anim: "Idle", duration: 1.5, state },
+        { kind: "turn", dir: 0 }
+      ]);
+      return true;
+    }
+    const reaction = REACTIONS[this.species]?.[species];
+    this.visitorCaption = reaction?.caption?.(label) || `Watching a wild ${label}`;
+    const middle = this.reduced ? [{ kind: "pose", anim: "Idle", duration: 3, state }] : reaction?.steps?.call(this, state) || [
+      ...this.species === "squirtle" && this.random() < 0.4 ? [{ kind: "pose", anim: "Withdraw", once: true, rate: 0.8, state }] : [],
       { kind: "pose", anim: "Idle", duration: 3, state },
-      ...this.reduced ? [] : [{ kind: "pose", anim: "Nod", once: true, rate: 0.8, state }],
+      { kind: "pose", anim: "Nod", once: true, rate: 0.8, state }
+    ];
+    this.start([
+      face,
+      { kind: "call", fn: () => this.say("!", 1) },
+      ...middle,
       { kind: "pose", anim: "Idle", duration: 1.5, state },
       { kind: "turn", dir: 0 }
     ]);
@@ -1279,7 +1389,7 @@ var Companion = class {
   }
   get caption() {
     if (this.state === "treasure" && this.lastFound) return `Found ${KEEPSAKES[this.lastFound].name}! Keeping it safe`;
-    if (this.state === "visitor" && this.visitor) return `Watching a wild ${VISITORS[this.visitor].name}`;
+    if (this.state === "visitor" && this.visitor) return this.visitorCaption || `Watching a wild ${VISITORS[this.visitor]?.name || "visitor"}`;
     if (this.state === "admiring" && this.admiring) return `Checking on ${KEEPSAKES[this.admiring].name}`;
     if (this.state === "milestone" && this.milestone) return `${milestoneName(this.milestone)}. Thank you for every day`;
     return CAPTIONS[this.state] || CAPTIONS.idle;
@@ -3086,9 +3196,9 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
     }
   }
   function drawVisitor(v, reduced) {
-    const sheets = visitorSprites[v.species];
+    const sheets = visitorSprites[v.sheet || v.species];
     if (!sheets) return;
-    if (VISITORS[v.species].pond) {
+    if ((v.def || VISITORS[v.species])?.pond) {
       const sink = v.anim === "Hop" ? 4 : 13;
       c.save();
       c.beginPath();
@@ -3123,7 +3233,7 @@ function createRenderer(canvas, sprites, species, form = species, visitorSprites
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
     if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
     const visitor = extras.visitor;
-    if (visitor) items.push({ y: VISITORS[visitor.species].pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
+    if (visitor) items.push({ y: (visitor.def || VISITORS[visitor.species])?.pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
     items.push({ y: pet.swimming ? pet.y - 6 : pet.y, draw: () => drawPet(pet, reduced) });
     if (pet.ball) items.push({ y: pet.ball.phase === "carried" ? pet.y + 0.5 : pet.ball.y, draw: () => drawBall(pet.ball, reduced) });
     if (pet.ball?.phase === "carried") bubbleLift = 9;
@@ -3378,16 +3488,18 @@ var LATE_END = 5;
 var isLateNight = (date) => date instanceof Date && date.getHours() >= LATE_START && date.getHours() < LATE_END;
 
 // src/runtime.js
-async function loadVisitorSprites() {
-  const entries = await Promise.all(Object.keys(VISITORS).map(async (id) => [id, await loadSprites(id)]));
+async function loadVisitorSprites(cameos = []) {
+  const sheets = [...Object.keys(VISITORS), ...cameos.map((c) => c?.form).filter((form) => typeof form === "string" && Object.hasOwn(FORMS, form))];
+  const entries = await Promise.all([...new Set(sheets)].map(async (id) => [id, await loadSprites(id)]));
   return Object.fromEntries(entries);
 }
 var FPS = 30;
 var REDUCED_FPS = 8;
-function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
   let disposed = false, ready = false, frame = 0, last = 0, pending = 0, inView = false, renderer, draw, lastStatus = "", phase = "day", currentSeason = "summer", currentWeather = "clear", phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
+  const cameoList = pet ? Array.isArray(cameos()) ? cameos() : [] : [];
   const disposers = [];
   const updatePhase = () => {
     const setting = sky(), s = season(), date = /* @__PURE__ */ new Date();
@@ -3404,6 +3516,7 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
       const earned = rewards();
       pet.rewards = Array.isArray(earned) ? earned.filter((id) => typeof id === "string") : [];
       pet.phase = phase;
+      visitors?.setCameos(cameoList);
     }
   };
   function stop() {
@@ -3521,7 +3634,7 @@ function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = (
         else if (!["working", "waiting"].includes(now.kind)) pet.endCompany?.();
       })
     );
-  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites() : {}]).then(([sprites, visitorSprites]) => {
+  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites(cameoList) : {}]).then(([sprites, visitorSprites]) => {
     if (disposed) return;
     if (pet) {
       renderer = createRenderer(canvas, sprites, species, assetForm, visitorSprites);
@@ -3670,7 +3783,7 @@ function advanceTogetherTime(raw, lineage, seconds, at) {
 
 // src/persistence.js
 var STORAGE_KEY = "companion";
-var VERSION = 5;
+var VERSION = 6;
 var SKIES = ["auto", "dawn", "day", "dusk", "night"];
 var DEFAULT_RECORD = {
   version: VERSION,
@@ -3700,14 +3813,25 @@ function validateMemory(raw) {
     metAt: timestamp2(raw?.metAt) ? raw.metAt : 0,
     milestones: Array.isArray(raw?.milestones) ? [...new Set(raw.milestones.filter((d) => Number.isInteger(d) && d > 0 && d <= 36500))].sort((a, b) => a - b).slice(-64) : [],
     // Only keepsakes actually found can be set out in the garden.
-    placed: Array.isArray(raw?.placed) ? [...new Set(raw.placed.filter((id) => keepsakes.includes(id)))].slice(0, MAX_PLACED) : []
+    placed: Array.isArray(raw?.placed) ? [...new Set(raw.placed.filter((id) => keepsakes.includes(id)))].slice(0, MAX_PLACED) : [],
+    sightings: validateSightings(raw?.sightings)
   };
+}
+function validateSightings(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const id of Object.keys(VISITORS)) {
+    const s = raw[id];
+    if (!s || typeof s !== "object" || !Number.isInteger(s.count) || s.count <= 0 || !timestamp2(s.firstAt) || !timestamp2(s.lastAt)) continue;
+    out[id] = { count: Math.min(s.count, 1e6), firstAt: s.firstAt, lastAt: Math.max(s.firstAt, s.lastAt) };
+  }
+  return out;
 }
 function cleanName(value, species) {
   return (typeof value === "string" ? [...value.replace(/[\u0000-\u001f\u007f]/g, "").trim()].slice(0, 24).join("") : "") || SPECIES[species]?.name || "";
 }
 function validateRecord(raw) {
-  if (!raw || ![1, 2, 3, 4, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
+  if (!raw || ![1, 2, 3, 4, 5, VERSION].includes(raw.version)) return { ...DEFAULT_RECORD, memories: {}, progression: {} };
   const species = knownSpecies(raw.species) ? raw.species : null;
   const memories = {};
   const progression = {};
@@ -3788,6 +3912,14 @@ function createPersistence(storage) {
       const placed = memory.placed.includes(keepsake) ? memory.placed.filter((id) => id !== keepsake) : memory.placed.length < MAX_PLACED ? [...memory.placed, keepsake] : null;
       return placed ? this.remember(species, { placed }) : false;
     },
+    // A wild visitor was watched: count it once per visit, keeping the first and latest time.
+    sighting(species, visitor, at = Date.now()) {
+      if (!knownSpecies(species) || !Object.hasOwn(VISITORS, visitor) || !timestamp2(at)) return false;
+      const sightings = validateMemory(state.get().record.memories[species]).sightings;
+      const previous = sightings[visitor];
+      const next = previous ? { count: previous.count + 1, firstAt: previous.firstAt, lastAt: Math.max(previous.lastAt, at) } : { count: 1, firstAt: at, lastAt: at };
+      return this.remember(species, { sightings: { ...sightings, [visitor]: next } });
+    },
     noteArrival(species, at) {
       if (!knownSpecies(species)) return false;
       const arrivals = validateMemory(state.get().record.memories[species]).arrivals;
@@ -3854,6 +3986,7 @@ function createCompanionMemory({ store, species, pet, now = Date.now }) {
     for (const event of events) {
       if (event.type === "favorite") patch.favoriteSpot = event.spot;
       if (event.type === "keepsake") store.collect(species, event.id);
+      if (event.type === "sighting") store.sighting(species, event.id, at);
       if (event.type === "interaction") {
         store.awardXp(species, event.kind, at);
         patch.lastInteraction = { kind: event.kind, at };
@@ -3997,6 +4130,7 @@ function MemoryNote({ memory, onPlace: onPlace2 }) {
   const moment = memory.lastInteraction;
   const usual = usualTimes(memory.arrivals || []);
   const rewards = rewardsFor(memory.milestones);
+  const seen = Object.entries(memory.sightings || {}).sort((a, b) => b[1].count - a[1].count);
   const clock = (m) => new Intl.DateTimeFormat(void 0, { hour: "numeric", minute: "2-digit" }).format(new Date(2e3, 0, 1, Math.floor(m / 60), m % 60));
   return /* @__PURE__ */ jsxs("div", { className: "hp-memories", "aria-label": "Little things remembered", children: [
     /* @__PURE__ */ jsx("span", { className: "hp-eyebrow", children: "LITTLE THINGS REMEMBERED" }),
@@ -4030,6 +4164,16 @@ function MemoryNote({ memory, onPlace: onPlace2 }) {
       /* @__PURE__ */ jsxs("div", { children: [
         /* @__PURE__ */ jsx("dt", { children: "In the garden" }),
         /* @__PURE__ */ jsx("dd", { children: rewards.length ? rewards.map((id) => REWARDS[id].label).join(" \xB7 ") : "A bench on day 30, a lantern on day 100, bunting each anniversary" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("dt", { children: "Visitors seen" }),
+        /* @__PURE__ */ jsxs("dd", { children: [
+          seen.length ? seen.map(([id, s]) => `${VISITORS[id].name} \xD7${s.count}`).join(" \xB7 ") : "None yet. Wild Pok\xE9mon stop by now and then",
+          seen.length > 0 && /* @__PURE__ */ jsxs("small", { children: [
+            " \xB7 first ",
+            new Intl.DateTimeFormat(void 0, { month: "short", day: "numeric" }).format(Math.min(...seen.map(([, s]) => s.firstAt)))
+          ] })
+        ] })
       ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "hp-keepsakes", "aria-label": "Keepsakes found together", children: [
@@ -4333,13 +4477,14 @@ function Settings({ record, store, onClose, onChange, pet }) {
   );
 }
 function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
-  const canvas = useRef(), motion = useRef(reduced), sky = useRef(record.sky), season = useRef({ setting: record.season, hemisphere: record.hemisphere }), weather = useRef(record.weather), placed = useRef([]), rewards = useRef([]), focusTarget = useRef(null), runtime = useRef(), settingsButton = useRef(), evolutionPosition = useRef();
+  const canvas = useRef(), motion = useRef(reduced), sky = useRef(record.sky), season = useRef({ setting: record.season, hemisphere: record.hemisphere }), weather = useRef(record.weather), placed = useRef([]), rewards = useRef([]), focusTarget = useRef(null), cameos = useRef([]), runtime = useRef(), settingsButton = useRef(), evolutionPosition = useRef();
   motion.current = reduced;
   sky.current = record.sky;
   season.current = { setting: record.season, hemisphere: record.hemisphere };
   weather.current = record.weather;
   placed.current = store.getMemory(record.species).placed;
   rewards.current = rewardsFor(store.getMemory(record.species).milestones);
+  cameos.current = Object.keys(SPECIES).filter((lineage) => lineage !== record.species && store.getMemory(lineage).metAt > 0).map((lineage) => ({ lineage, form: formFor(lineage, store.getProgression(lineage).stage), name: SPECIES[lineage].name }));
   const progress = store.getProgression(record.species);
   const form = formFor(record.species, progress.stage);
   const pet = useMemo(() => new Companion(record.species, Math.random, {
@@ -4382,6 +4527,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       placed: () => placed.current,
       rewards: () => rewards.current,
       focus: () => focusTarget.current,
+      cameos: () => cameos.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,

@@ -94,7 +94,7 @@ export class Companion {
   }
   get caption() {
     if (this.state === "treasure" && this.lastFound) return `Found ${KEEPSAKES[this.lastFound].name}! Keeping it safe`;
-    if (this.state === "visitor" && this.visitor) return `Watching a wild ${VISITORS[this.visitor].name}`;
+    if (this.state === "visitor" && this.visitor) return this.visitorCaption || `Watching a wild ${VISITORS[this.visitor]?.name || "visitor"}`;
     if (this.state === "admiring" && this.admiring) return `Checking on ${KEEPSAKES[this.admiring].name}`;
     if (this.state === "milestone" && this.milestone) return `${milestoneName(this.milestone)}. Thank you for every day`;
     return CAPTIONS[this.state] || CAPTIONS.idle;

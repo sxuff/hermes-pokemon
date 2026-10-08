@@ -31,6 +31,7 @@ export function createCompanionMemory({ store, species, pet, now = Date.now }) {
     for (const event of events) {
       if (event.type === "favorite") patch.favoriteSpot = event.spot;
       if (event.type === "keepsake") store.collect(species, event.id);
+      if (event.type === "sighting") store.sighting(species, event.id, at);
       if (event.type === "interaction") {
         store.awardXp(species, event.kind, at);
         patch.lastInteraction = { kind: event.kind, at };

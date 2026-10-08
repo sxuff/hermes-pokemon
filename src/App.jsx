@@ -13,6 +13,7 @@ import { WEATHER_SETTINGS, resolveWeather } from "./weather.js";
 import { daysTogether, milestoneName, rewardsFor, REWARDS } from "./milestones.js";
 import { usualTimes } from "./rhythm.js";
 import { TARGETS, keyboardAction, announce } from "./keyboard.js";
+import { VISITORS } from "./visitors.js";
 
 function Growth({ species, progress, pet, ready, ctx, bridge, reduced, onEvolve }) {
   const [confirming, setConfirming] = useState(false);
@@ -65,6 +66,7 @@ function MemoryNote({ memory, onPlace }) {
   const moment = memory.lastInteraction;
   const usual = usualTimes(memory.arrivals || []);
   const rewards = rewardsFor(memory.milestones);
+  const seen = Object.entries(memory.sightings || {}).sort((a, b) => b[1].count - a[1].count);
   const clock = (m) => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, Math.floor(m / 60), m % 60));
   return <div className="hp-memories" aria-label="Little things remembered">
     <span className="hp-eyebrow">LITTLE THINGS REMEMBERED</span>
@@ -75,7 +77,11 @@ function MemoryNote({ memory, onPlace }) {
       <div><dt>Usually see you</dt><dd>{usual.length ? usual.map(clock).join(" · ") : "Still learning your rhythm"}</dd></div>
       <div><dt>Days together</dt><dd>{memory.metAt ? daysTogether(memory.metAt, Date.now()) : 0}
         {memory.milestones.length > 0 && <small> · {milestoneName(memory.milestones.at(-1))} celebrated</small>}</dd></div>
-      <div><dt>In the garden</dt><dd>{rewards.length ? rewards.map((id) => REWARDS[id].label).join(" · ") : "A bench on day 30, a lantern on day 100, bunting each anniversary"}</dd></div></dl>
+      <div><dt>In the garden</dt><dd>{rewards.length ? rewards.map((id) => REWARDS[id].label).join(" · ") : "A bench on day 30, a lantern on day 100, bunting each anniversary"}</dd></div>
+      <div><dt>Visitors seen</dt><dd>{seen.length
+        ? seen.map(([id, s]) => `${VISITORS[id].name} ×${s.count}`).join(" · ")
+        : "None yet. Wild Pokémon stop by now and then"}
+        {seen.length > 0 && <small> · first {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(Math.min(...seen.map(([, s]) => s.firstAt)))}</small>}</dd></div></dl>
     <div className="hp-keepsakes" aria-label="Keepsakes found together">
       <span className="hp-label">Keepsakes <small>{memory.keepsakes.length} / {KEEPSAKE_COUNT}</small></span>
       {memory.keepsakes.length
@@ -380,6 +386,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
     placed = useRef([]),
     rewards = useRef([]),
     focusTarget = useRef(null),
+    cameos = useRef([]),
     runtime = useRef(),
     settingsButton = useRef(),
     evolutionPosition = useRef();
@@ -389,6 +396,10 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
   weather.current = record.weather;
   placed.current = store.getMemory(record.species).placed;
   rewards.current = rewardsFor(store.getMemory(record.species).milestones);
+  // Starters you have met before may drop by for a cameo, at the form they have reached.
+  cameos.current = Object.keys(SPECIES)
+    .filter((lineage) => lineage !== record.species && store.getMemory(lineage).metAt > 0)
+    .map((lineage) => ({ lineage, form: formFor(lineage, store.getProgression(lineage).stage), name: SPECIES[lineage].name }));
   const progress = store.getProgression(record.species);
   const form = formFor(record.species, progress.stage);
   const pet = useMemo(() => new Companion(record.species, Math.random, {
@@ -432,6 +443,7 @@ function Habitat({ record, store, ctx, bridge, reduced, onChange }) {
       placed: () => placed.current,
       rewards: () => rewards.current,
       focus: () => focusTarget.current,
+      cameos: () => cameos.current,
       memory: controller,
       onReady: () => setReady(true),
       onError: setError,

@@ -7,8 +7,10 @@ import { LONG_TURN_MS } from "./hermes.js";
 import { resolveWeather, isLateNight } from "./weather.js";
 import { Visitors, VISITORS } from "./visitors.js";
 
-async function loadVisitorSprites() {
-  const entries = await Promise.all(Object.keys(VISITORS).map(async (id) => [id, await loadSprites(id)]));
+async function loadVisitorSprites(cameos = []) {
+  // Wild visitors by species, cameos by the form your other starter has reached.
+  const sheets = [...Object.keys(VISITORS), ...cameos.map((c) => c?.form).filter((form) => typeof form === "string" && Object.hasOwn(FORMS, form))];
+  const entries = await Promise.all([...new Set(sheets)].map(async (id) => [id, await loadSprites(id)]));
   return Object.fromEntries(entries);
 }
 
@@ -16,7 +18,7 @@ const FPS = 30,
   REDUCED_FPS = 8;
 
 // Each mounted canvas owns one scheduler. Visibility changes cancel the pending frame.
-export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
+export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, sky = () => "auto", season = () => ({ setting: "auto", hemisphere: "north" }), weather = () => "auto", placed = () => [], rewards = () => [], focus = () => null, cameos = () => [], selected, memory, onStatus, onError, onReady, onEvolutionComplete }) {
   const assetForm = pet?.form || form || species;
   let disposed = false,
     ready = false,
@@ -32,6 +34,8 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
     currentWeather = "clear",
     phaseCheck = 0;
   const visitors = pet ? new Visitors() : null;
+  // Starters you have raised before, fixed at mount so their sheets are loaded once.
+  const cameoList = pet ? (Array.isArray(cameos()) ? cameos() : []) : [];
   const disposers = [];
   const updatePhase = () => {
     const setting = sky(), s = season(), date = new Date();
@@ -49,6 +53,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
       const earned = rewards();
       pet.rewards = Array.isArray(earned) ? earned.filter((id) => typeof id === "string") : [];
       pet.phase = phase;
+      visitors?.setCameos(cameoList);
     }
   };
   function stop() {
@@ -163,7 +168,7 @@ export function mountCanvas({ canvas, ctx, bridge, pet, species, form, reduced, 
         else if (!["working", "waiting"].includes(now.kind)) pet.endCompany?.();
       }),
     );
-  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites() : {}])
+  Promise.all([loadSprites(assetForm), pet ? loadVisitorSprites(cameoList) : {}])
     .then(([sprites, visitorSprites]) => {
       if (disposed) return;
       if (pet) {

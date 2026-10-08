@@ -177,6 +177,26 @@ document.querySelector("#milestone").addEventListener("click", () => {
   document.querySelector("#event-label").textContent = "Simulated: day 100 together. The bench and the lantern are yours to keep.";
   enable();
 });
+// Simulated: a starter you met before drops by. Seeds a memory for another starter if needed.
+document.querySelector("#cameo").addEventListener("click", () => {
+  const record = storage.get("companion", null);
+  if (!record?.species) {
+    document.querySelector("#event-label").textContent = "Choose your companion first, then invite an old friend.";
+    return;
+  }
+  const other = ["bulbasaur", "charmander", "squirtle"].find((s) => s !== record.species);
+  const memories = record.memories || {};
+  if (!memories[other]?.metAt) {
+    dispose();
+    storage.set("companion", { ...record, memories: { ...memories, [other]: { ...memories[other], metAt: Date.now() - 86_400_000 } } });
+    enable();
+  }
+  const runtime = globalThis.__hermesPokemonDebug?.runtime?.();
+  const ok = runtime?.summonVisitor(`cameo:${other}`);
+  document.querySelector("#event-label").textContent = ok
+    ? `Simulated: ${other[0].toUpperCase() + other.slice(1)}, a starter you raised before, drops by.`
+    : "No cameo right now: someone is already visiting, or extra quiet mode is on.";
+});
 function simulateGrowth(evolution) {
   const label = document.querySelector("#growth-label");
   if (!storage.get("companion", null)?.species) {

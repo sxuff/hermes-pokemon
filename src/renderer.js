@@ -232,9 +232,9 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     }
   }
   function drawVisitor(v, reduced) {
-    const sheets = visitorSprites[v.species];
+    const sheets = visitorSprites[v.sheet || v.species];
     if (!sheets) return;
-    if (VISITORS[v.species].pond) {
+    if ((v.def || VISITORS[v.species])?.pond) {
       // Sunk in the water: only the back and fins show above the waterline, with a ring around it.
       const sink = v.anim === "Hop" ? 4 : 13;
       c.save();
@@ -272,7 +272,7 @@ export function createRenderer(canvas, sprites, species, form = species, visitor
     const items = [{ y: tree.baseY, draw: () => c.drawImage(tree.canvas, tree.x, tree.y) }];
     if (extras.placed?.length) items.push({ y: 0, draw: () => drawDecor(extras.placed) });
     const visitor = extras.visitor;
-    if (visitor) items.push({ y: VISITORS[visitor.species].pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
+    if (visitor) items.push({ y: (visitor.def || VISITORS[visitor.species])?.pond ? visitor.y - 6 : visitor.y + (visitor.z ? 40 : 0), draw: () => drawVisitor(visitor, reduced) });
     items.push({ y: pet.swimming ? pet.y - 6 : pet.y, draw: () => drawPet(pet, reduced) });
     if (pet.ball) items.push({ y: pet.ball.phase === "carried" ? pet.y + 0.5 : pet.ball.y, draw: () => drawBall(pet.ball, reduced) });
     if (pet.ball?.phase === "carried") bubbleLift = 9;
